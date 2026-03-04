@@ -1,0 +1,408 @@
+---
+title: Points
+description: Understanding points in Qdrant - the fundamental unit of data combining vectors, IDs, and payloads
+---
+
+A **point** is the fundamental unit of data in Qdrant. Each point consists of:
+
+- **ID**: A unique identifier (integer or UUID)
+- **Vector**: One or more dense or sparse vectors
+- **Payload**: Optional JSON metadata
+
+## Point Structure
+
+Here's what a complete point looks like:
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", port=6333)
+
+client.upsert(
+    collection_name="my_collection",
+    points=[
+        models.PointStruct(
+            id=1,  # or uuid.uuid4()
+            vector=[0.1, 0.2, 0.3, 0.4],
+            payload={
+                "title": "Introduction to Vector Databases",
+                "author": "Jane Smith",
+                "category": "technology",
+                "year": 2024,
+                "tags": ["vectors", "databases", "search"]
+            }
+        )
+    ]
+)
+```
+
+<Info>
+Every point must have an ID and at least one vector. Payload is optional but highly recommended for filtering and retrieval.
+</Info>
+
+## Point IDs
+
+Qdrant supports two types of point IDs:
+
+### Integer IDs (u64)
+
+Simple numeric identifiers from 0 to 2^64-1:
+
+```python
+models.PointStruct(
+    id=42,
+    vector=[0.1, 0.2, 0.3],
+    payload={"name": "example"}
+)
+```
+
+### UUID IDs
+
+Universally unique identifiers for distributed systems:
+
+```python
+import uuid
+
+models.PointStruct(
+    id=uuid.UUID("550e8400-e29b-41d4-a716-446655440000"),
+    vector=[0.1, 0.2, 0.3],
+    payload={"name": "example"}
+)
+```
+
+```rust
+// From lib/segment/src/types.rs:162-169
+pub enum ExtendedPointId {
+    NumId(u64),
+    Uuid(Uuid),
+}
+```
+
+<Tip>
+Use UUID IDs when:
+- Integrating with external systems that use UUIDs
+- Building distributed systems where IDs are generated independently
+- You need guaranteed global uniqueness
+</Tip>
+
+<Warning>
+Point IDs within a collection must be unique. Upserting a point with an existing ID will replace the old point entirely.
+</Warning>
+
+## Vector Data
+
+### Single Vector
+
+Most common case - one vector per point:
+
+```python
+models.PointStruct(
+    id=1,
+    vector=[0.1, 0.2, 0.3, 0.4],  # Must match collection's vector size
+    payload={"text": "example"}
+)
+```
+
+### Named Vectors
+
+Multiple vectors of different types per point:
+
+```python
+models.PointStruct(
+    id=1,
+    vector={
+        "image": [0.1, 0.2, ...],  # 512-dim image embedding
+        "text": [0.3, 0.4, ...]     # 384-dim text embedding
+    },
+    payload={"title": "Multimodal example"}
+)
+```
+
+### Sparse Vectors
+
+For high-dimensional sparse data:
+
+```python
+models.PointStruct(
+    id=1,
+    vector={
+        "dense": [0.1, 0.2, 0.3],
+        "sparse": models.SparseVector(
+            indices=[10, 25, 103, 507],
+            values=[0.5, 0.3, 0.8, 0.2]
+        )
+    },
+    payload={"text": "hybrid search example"}
+)
+```
+
+## Payloads
+
+Payloads are JSON objects attached to points for filtering and retrieval:
+
+```python
+payload = {
+    # String values
+    "title": "Vector Database Guide",
+    "category": "technology",
+    
+    # Numeric values
+    "price": 29.99,
+    "rating": 4.5,
+    "year": 2024,
+    
+    # Boolean values
+    "published": True,
+    "featured": False,
+    
+    # Arrays
+    "tags": ["vectors", "database", "search"],
+    "colors": ["red", "blue", "green"],
+    
+    # Nested objects
+    "author": {
+        "name": "Jane Smith",
+        "email": "jane@example.com"
+    },
+    
+    # Geo points
+    "location": {
+        "lon": -0.1276,
+        "lat": 51.5074
+    },
+    
+    # Datetime (RFC3339 format)
+    "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+See [Payloads](/concepts/payloads) for detailed information on payload types and indexing.
+
+## Batch Operations
+
+### Upserting Multiple Points
+
+Efficiently insert or update many points at once:
+
+```python
+points = [
+    models.PointStruct(
+        id=i,
+        vector=[0.1 * i, 0.2 * i, 0.3 * i],
+        payload={"index": i, "category": f"cat_{i % 5}"}
+    )
+    for i in range(1000)
+]
+
+client.upsert(
+    collection_name="my_collection",
+    points=points
+)
+```
+
+<Info>
+Batch operations are much more efficient than individual upserts. Aim for batches of 100-1000 points.
+</Info>
+
+### Retrieving Points by ID
+
+```python
+# Get specific points
+points = client.retrieve(
+    collection_name="my_collection",
+    ids=[1, 2, 3, 42],
+    with_payload=True,
+    with_vectors=True
+)
+
+for point in points:
+    print(f"ID: {point.id}")
+    print(f"Vector: {point.vector}")
+    print(f"Payload: {point.payload}")
+```
+
+### Deleting Points
+
+Delete by IDs:
+
+```python
+client.delete(
+    collection_name="my_collection",
+    points_selector=models.PointIdsList(
+        points=[1, 2, 3]
+    )
+)
+```
+
+Delete by filter:
+
+```python
+client.delete(
+    collection_name="my_collection",
+    points_selector=models.FilterSelector(
+        filter=models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="year",
+                    range=models.Range(lt=2020)
+                )
+            ]
+        )
+    )
+)
+```
+
+## Scrolling Through Points
+
+Iterate through all points in a collection:
+
+```python
+offset = None
+all_points = []
+
+while True:
+    result = client.scroll(
+        collection_name="my_collection",
+        limit=100,
+        offset=offset,
+        with_payload=True,
+        with_vectors=False
+    )
+    
+    points, next_offset = result
+    all_points.extend(points)
+    
+    if next_offset is None:
+        break
+    
+    offset = next_offset
+
+print(f"Total points: {len(all_points)}")
+```
+
+```rust
+// From lib/collection/src/operations/types.rs:624-632
+pub struct ScrollResult {
+    /// List of retrieved points
+    pub points: Vec<api::rest::Record>,
+    /// Offset for next page
+    pub next_page_offset: Option<PointIdType>,
+}
+```
+
+<Tip>
+Use scrolling for exports, backups, or full collection processing. For search, use the search endpoint instead.
+</Tip>
+
+## Point Versioning
+
+Each point has an internal version number that increments with each update:
+
+```rust
+// From lib/segment/src/types.rs:372-388
+pub struct ScoredPoint {
+    pub id: PointIdType,
+    pub version: SeqNumberType,  // Sequential version number
+    pub score: ScoreType,
+    pub payload: Option<Payload>,
+    pub vector: Option<VectorStructInternal>,
+    pub shard_key: Option<ShardKey>,
+    pub order_value: Option<OrderValue>,
+}
+```
+
+Versions are used internally for consistency and can help with debugging updates.
+
+## Update Strategies
+
+### Upsert (Overwrite)
+
+Replaces the entire point:
+
+```python
+client.upsert(
+    collection_name="my_collection",
+    points=[
+        models.PointStruct(
+            id=1,
+            vector=[0.9, 0.8, 0.7],
+            payload={"new": "data"}  # Replaces old payload completely
+        )
+    ]
+)
+```
+
+### Set Payload (Merge)
+
+Merges with existing payload:
+
+```python
+client.set_payload(
+    collection_name="my_collection",
+    payload={"category": "updated", "new_field": "value"},
+    points=[1, 2, 3]
+)
+```
+
+### Overwrite Payload (Replace)
+
+Replaces payload without changing vector:
+
+```python
+client.overwrite_payload(
+    collection_name="my_collection",
+    payload={"only": "this"},
+    points=[1, 2, 3]
+)
+```
+
+### Delete Payload Keys
+
+Remove specific fields:
+
+```python
+client.delete_payload(
+    collection_name="my_collection",
+    keys=["old_field", "temporary_data"],
+    points=[1, 2, 3]
+)
+```
+
+## Best Practices
+
+<Accordion title="Use batch operations">
+  Always prefer batch upserts over individual operations. Batching 100-1000 points provides optimal performance.
+</Accordion>
+
+<Accordion title="Choose ID type carefully">
+  Stick with integer IDs unless you specifically need UUIDs. Integer IDs are more compact and efficient.
+</Accordion>
+
+<Accordion title="Keep vectors normalized">
+  If using Cosine distance, normalize your vectors before insertion for consistent results.
+</Accordion>
+
+<Accordion title="Index important payload fields">
+  Create payload indexes for fields you frequently filter on to improve query performance.
+</Accordion>
+
+<Accordion title="Avoid huge payloads">
+  Keep payload sizes reasonable (less than 1KB per point). Store large objects externally and reference them in the payload.
+</Accordion>
+
+## Related Concepts
+
+<CardGroup cols={2}>
+  <Card title="Collections" icon="layer-group" href="/concepts/collections">
+    Learn how collections organize and configure points
+  </Card>
+  <Card title="Vectors" icon="chart-network" href="/concepts/vectors">
+    Deep dive into vector types and configurations
+  </Card>
+  <Card title="Payloads" icon="database" href="/concepts/payloads">
+    Understand payload structure and indexing
+  </Card>
+  <Card title="Indexing" icon="magnifying-glass" href="/concepts/indexing">
+    Explore how points are indexed for fast search
+  </Card>
+</CardGroup>

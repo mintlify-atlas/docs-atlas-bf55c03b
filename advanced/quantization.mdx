@@ -1,0 +1,508 @@
+---
+title: Vector Quantization
+description: Reduce memory usage by up to 97% with scalar, product, and binary quantization while maintaining search quality
+---
+
+Vector quantization compresses vector representations to reduce memory usage and improve search performance. Qdrant supports three quantization methods, each offering different tradeoffs between compression ratio, search quality, and speed.
+
+## Why Quantization?
+
+Full-precision vectors (float32) require significant memory:
+- 768-dimensional vector = 768 × 4 bytes = 3KB per vector
+- 1 million vectors = ~3GB of RAM
+- 100 million vectors = ~300GB of RAM
+
+Quantization can reduce this by **4x to 32x** while maintaining search quality.
+
+<Info>
+Qdrant uses quantized vectors for initial filtering, then rescores top candidates with original vectors for maximum accuracy.
+</Info>
+
+## Quantization Methods
+
+<CardGroup cols={3}>
+  <Card title="Scalar" icon="1">
+    **4x compression**
+    
+    Float32 → Int8
+    
+    Best for general use
+  </Card>
+  <Card title="Product (PQ)" icon="2">
+    **8-64x compression**
+    
+    Vectors → Centroids
+    
+    Maximum compression
+  </Card>
+  <Card title="Binary" icon="3">
+    **32x compression**
+    
+    Float32 → Bits
+    
+    Fastest search
+  </Card>
+</CardGroup>
+
+## Scalar Quantization
+
+Converts float32 values to int8 by learning the value range.
+
+### Configuration
+
+```json
+PUT /collections/my_collection
+{
+  "vectors": {
+    "size": 768,
+    "distance": "Cosine"
+  },
+  "quantization_config": {
+    "scalar": {
+      "type": "int8",
+      "quantile": 0.99,
+      "always_ram": true
+    }
+  }
+}
+```
+
+<ParamField path="type" type="string" default="int8">
+  Quantization type. Currently only `int8` is supported.
+</ParamField>
+
+<ParamField path="quantile" type="float" default="1.0">
+  Quantile for range calculation (0.5-1.0). Use 0.99 to ignore outliers.
+</ParamField>
+
+<ParamField path="always_ram" type="boolean" default="false">
+  Keep quantized vectors in RAM even when main vectors are on disk.
+</ParamField>
+
+### How It Works
+
+1. **Analyze value distribution** across all vectors
+2. **Calculate range** based on quantile (e.g., 0.99 excludes top/bottom 1%)
+3. **Map range** to int8 values (-128 to 127)
+4. **Store offset and scale** for reconstruction
+
+```python
+# Pseudocode
+min_val, max_val = calculate_quantile_range(vectors, quantile=0.99)
+alpha = (max_val - min_val) / 255
+quantized = ((vector - min_val) / alpha).round().clip(0, 127).astype(int8)
+```
+
+### Memory Savings
+
+- **Original**: 768 dimensions × 4 bytes = 3,072 bytes
+- **Quantized**: 768 dimensions × 1 byte = 768 bytes
+- **Savings**: 75% reduction (4x compression)
+
+### When to Use
+
+<Check>Best for most use cases with good balance of compression and quality</Check>
+<Check>Works well with all distance metrics (Cosine, Euclidean, Dot)</Check>
+<Check>Minimal accuracy loss (typically less than 2% recall drop)</Check>
+
+## Product Quantization (PQ)
+
+Divides vectors into chunks and represents each chunk by the nearest centroid.
+
+### Configuration
+
+```json
+PUT /collections/my_collection
+{
+  "vectors": {
+    "size": 768,
+    "distance": "Cosine"
+  },
+  "quantization_config": {
+    "product": {
+      "compression": "x16",
+      "always_ram": true
+    }
+  }
+}
+```
+
+<ParamField path="compression" type="string" required>
+  Compression ratio: `x8`, `x16`, `x32`, or `x64`
+</ParamField>
+
+<ParamField path="always_ram" type="boolean" default="false">
+  Keep quantized vectors in RAM.
+</ParamField>
+
+### How It Works
+
+1. **Divide vector** into M equal chunks (subvectors)
+2. **Learn 256 centroids** for each chunk using k-means
+3. **Replace each chunk** with nearest centroid ID (1 byte)
+4. **Store codebook** of centroids for reconstruction
+
+Example with 768-dimensional vector and 16x compression:
+- Chunks: 768 / 48 = 16 chunks
+- Each chunk: 48 dimensions → 1 byte (centroid ID)
+- Result: 768 dims → 16 bytes
+
+### Memory Savings
+
+<Tabs>
+  <Tab title="x16 Compression">
+    - **Original**: 768 × 4 = 3,072 bytes
+    - **Quantized**: 768 / 16 = 48 bytes
+    - **Savings**: 98.4% reduction
+  </Tab>
+  <Tab title="x32 Compression">
+    - **Original**: 768 × 4 = 3,072 bytes
+    - **Quantized**: 768 / 32 = 24 bytes
+    - **Savings**: 99.2% reduction
+  </Tab>
+  <Tab title="x64 Compression">
+    - **Original**: 768 × 4 = 3,072 bytes
+    - **Quantized**: 768 / 64 = 12 bytes
+    - **Savings**: 99.6% reduction
+  </Tab>
+</Tabs>
+
+### Training Requirements
+
+PQ requires training on sample data:
+- Samples needed: ~10,000 vectors (configurable)
+- Training time: Proportional to dataset size and compression ratio
+- K-means iterations: Up to 100 iterations per chunk
+
+<Warning>
+PQ training happens automatically when enough vectors are indexed. Initial searches may be less accurate until training completes.
+</Warning>
+
+### When to Use
+
+<Check>Maximum memory reduction needed (millions of vectors)</Check>
+<Check>Willing to accept 5-10% recall drop</Check>
+<Check>Have enough data for training (>10k vectors)</Check>
+
+## Binary Quantization
+
+Represents each dimension as a bit (positive/negative or above/below threshold).
+
+### Configuration
+
+```json
+PUT /collections/my_collection
+{
+  "vectors": {
+    "size": 768,
+    "distance": "Cosine"
+  },
+  "quantization_config": {
+    "binary": {
+      "always_ram": true,
+      "encoding": "one_bit",
+      "query_encoding": "same_as_storage"
+    }
+  }
+}
+```
+
+<ParamField path="always_ram" type="boolean" default="false">
+  Keep quantized vectors in RAM.
+</ParamField>
+
+<ParamField path="encoding" type="string" default="one_bit">
+  Storage encoding: `one_bit`, `two_bits`, or `one_and_half_bits`
+</ParamField>
+
+<ParamField path="query_encoding" type="string" default="same_as_storage">
+  Query encoding for asymmetric quantization: `same_as_storage`, `scalar_4bits`, or `scalar_8bits`
+</ParamField>
+
+### Encoding Methods
+
+<Tabs>
+  <Tab title="One Bit">
+    Each dimension → 1 bit (sign)
+    
+    ```
+    value >= 0 → 1
+    value < 0  → 0
+    ```
+    
+    **Compression**: 32x for float32
+  </Tab>
+  <Tab title="Two Bits">
+    Each dimension → 2 bits (quantized magnitude)
+    
+    More accurate than one bit, 16x compression
+  </Tab>
+  <Tab title="One and Half Bits">
+    Adaptive encoding between 1 and 2 bits
+    
+    Balances accuracy and compression
+  </Tab>
+</Tabs>
+
+### Asymmetric Quantization
+
+Use higher precision for queries than stored vectors:
+
+```json
+{
+  "binary": {
+    "encoding": "one_bit",
+    "query_encoding": "scalar_8bits"
+  }
+}
+```
+
+This improves accuracy at the cost of slightly slower query processing.
+
+### Memory Savings
+
+- **Original**: 768 × 4 bytes = 3,072 bytes
+- **One Bit**: 768 bits = 96 bytes
+- **Savings**: 96.9% reduction (32x compression)
+
+### When to Use
+
+<Check>Need fastest possible search speed</Check>
+<Check>Working with high-dimensional vectors (>512 dims)</Check>
+<Check>Vectors have roughly balanced distributions</Check>
+
+## Enabling Quantization
+
+### On Collection Creation
+
+```json
+PUT /collections/my_collection
+{
+  "vectors": {
+    "size": 384,
+    "distance": "Cosine"
+  },
+  "quantization_config": {
+    "scalar": {
+      "type": "int8",
+      "quantile": 0.99,
+      "always_ram": true
+    }
+  }
+}
+```
+
+### On Existing Collection
+
+```json
+PATCH /collections/my_collection
+{
+  "quantization_config": {
+    "scalar": {
+      "type": "int8",
+      "quantile": 0.99,
+      "always_ram": true
+    }
+  }
+}
+```
+
+<Note>
+Updating quantization on an existing collection triggers background reindexing.
+</Note>
+
+### Python Client
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", port=6333)
+
+client.create_collection(
+    collection_name="my_collection",
+    vectors_config=models.VectorParams(
+        size=384,
+        distance=models.Distance.COSINE
+    ),
+    quantization_config=models.ScalarQuantization(
+        scalar=models.ScalarQuantizationConfig(
+            type=models.ScalarType.INT8,
+            quantile=0.99,
+            always_ram=True
+        )
+    )
+)
+```
+
+## Search with Quantization
+
+### Default Behavior
+
+Quantized search uses a two-stage approach:
+
+1. **Oversampling**: Retrieve more candidates with quantized vectors (e.g., 3x limit)
+2. **Rescoring**: Re-rank top candidates with original vectors
+3. **Return**: Top results after rescoring
+
+This maintains high accuracy while benefiting from quantization speed.
+
+### Controlling Oversampling
+
+```json
+POST /collections/my_collection/points/search
+{
+  "vector": [0.1, 0.2, 0.3, ...],
+  "limit": 10,
+  "params": {
+    "quantization": {
+      "rescore": true,
+      "oversampling": 2.0
+    }
+  }
+}
+```
+
+<ParamField path="rescore" type="boolean" default="true">
+  Enable rescoring with original vectors.
+</ParamField>
+
+<ParamField path="oversampling" type="float" default="depends on method">
+  Multiply limit by this factor for initial quantized search.
+  
+  Defaults:
+  - Scalar: 2.0
+  - PQ: 3.0
+  - Binary: 3.0
+</ParamField>
+
+### Disabling Rescoring
+
+For maximum speed at cost of accuracy:
+
+```json
+{
+  "params": {
+    "quantization": {
+      "rescore": false
+    }
+  }
+}
+```
+
+## Performance Tuning
+
+### Memory vs Disk Trade-off
+
+<Tabs>
+  <Tab title="Maximum Speed">
+    ```json
+    {
+      "quantization_config": {
+        "scalar": {
+          "always_ram": true
+        }
+      },
+      "hnsw_config": {
+        "on_disk": false
+      }
+    }
+    ```
+    
+    Keep everything in RAM for fastest search.
+  </Tab>
+  <Tab title="Balanced">
+    ```json
+    {
+      "quantization_config": {
+        "scalar": {
+          "always_ram": true
+        }
+      },
+      "hnsw_config": {
+        "on_disk": true
+      }
+    }
+    ```
+    
+    Quantized vectors in RAM, HNSW graph on disk.
+  </Tab>
+  <Tab title="Maximum Compression">
+    ```json
+    {
+      "quantization_config": {
+        "scalar": {
+          "always_ram": false
+        }
+      },
+      "hnsw_config": {
+        "on_disk": true
+      }
+    }
+    ```
+    
+    Everything on disk, minimal RAM usage.
+  </Tab>
+</Tabs>
+
+### Choosing Compression Ratio
+
+<Steps>
+  <Step title="Start with Scalar Quantization">
+    Test int8 scalar quantization first - it provides good compression with minimal accuracy loss.
+  </Step>
+  <Step title="Measure Accuracy">
+    Use your test queries to measure recall@k before and after quantization.
+  </Step>
+  <Step title="Increase Compression if Needed">
+    If you need more compression and can tolerate accuracy loss, try PQ with x16 or x32.
+  </Step>
+  <Step title="Tune Oversampling">
+    Increase oversampling factor if accuracy drops too much.
+  </Step>
+</Steps>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Test on Your Data">
+    Quantization accuracy varies by dataset. Always test with your actual data and queries before production deployment.
+  </Accordion>
+  
+  <Accordion title="Use always_ram for Speed">
+    Set `always_ram: true` if you have sufficient RAM - quantized vectors are small and keeping them in memory significantly improves speed.
+  </Accordion>
+  
+  <Accordion title="Monitor Recall Metrics">
+    Track recall@k during search to ensure quantization doesn't degrade results below acceptable thresholds.
+  </Accordion>
+  
+  <Accordion title="Consider Vector Characteristics">
+    - Normalized vectors: Binary quantization works well
+    - High variance: Scalar quantization with quantile tuning
+    - Very high dimensional: Product quantization for maximum compression
+  </Accordion>
+</AccordionGroup>
+
+## Limitations
+
+- Quantization is only available for dense vectors (not sparse vectors)
+- Cannot change quantization method without rebuilding the collection
+- PQ requires minimum dataset size for training (~10k vectors)
+- Binary quantization works best with normalized vectors
+
+## Memory Calculator
+
+Estimate memory savings:
+
+| Dimensions | Vectors | Float32 | Scalar (int8) | PQ (x16) | Binary (1-bit) |
+|------------|---------|---------|---------------|----------|----------------|
+| 384 | 1M | 1.5 GB | 384 MB | 24 MB | 48 MB |
+| 768 | 1M | 3.0 GB | 768 MB | 48 MB | 96 MB |
+| 1536 | 1M | 6.0 GB | 1.5 GB | 96 MB | 192 MB |
+| 768 | 10M | 30 GB | 7.5 GB | 480 MB | 960 MB |
+| 768 | 100M | 300 GB | 75 GB | 4.8 GB | 9.6 GB |
+
+## Related Topics
+
+- [HNSW Index](/indexing/hnsw) - Configure HNSW for optimal performance with quantization
+- [Memory Optimization](/optimization/memory) - Additional strategies for reducing memory usage

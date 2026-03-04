@@ -1,0 +1,540 @@
+---
+title: Batch Operations
+description: Learn how to perform efficient batch operations in Qdrant including batch insert, batch update, batch delete, and scrolling through large datasets.
+---
+
+Batch operations allow you to perform multiple operations in a single request, significantly improving throughput and reducing network overhead.
+
+## Batch Insert/Upsert
+
+Insert or update multiple points in a single request.
+
+### API Endpoint
+
+```
+PUT /collections/{collection_name}/points
+```
+
+<CodeGroup>
+
+```bash REST API - List Format
+curl -X PUT http://localhost:6333/collections/my_collection/points \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [
+      {"id": 1, "vector": [0.1, 0.2, 0.3], "payload": {"city": "Berlin"}},
+      {"id": 2, "vector": [0.2, 0.3, 0.4], "payload": {"city": "London"}},
+      {"id": 3, "vector": [0.3, 0.4, 0.5], "payload": {"city": "Paris"}},
+      {"id": 4, "vector": [0.4, 0.5, 0.6], "payload": {"city": "Madrid"}},
+      {"id": 5, "vector": [0.5, 0.6, 0.7], "payload": {"city": "Rome"}}
+    ]
+  }'
+```
+
+```bash REST API - Batch Format
+curl -X PUT http://localhost:6333/collections/my_collection/points \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "batch": {
+      "ids": [1, 2, 3, 4, 5],
+      "vectors": [
+        [0.1, 0.2, 0.3],
+        [0.2, 0.3, 0.4],
+        [0.3, 0.4, 0.5],
+        [0.4, 0.5, 0.6],
+        [0.5, 0.6, 0.7]
+      ],
+      "payloads": [
+        {"city": "Berlin"},
+        {"city": "London"},
+        {"city": "Paris"},
+        {"city": "Madrid"},
+        {"city": "Rome"}
+      ]
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
+
+client = QdrantClient(url="http://localhost:6333")
+
+# Method 1: Using PointStruct list
+points = [
+    PointStruct(id=i, vector=[0.1*i, 0.2*i, 0.3*i], payload={"index": i})
+    for i in range(1, 101)
+]
+
+client.upsert(
+    collection_name="my_collection",
+    points=points
+)
+
+# Method 2: Using upload_collection for large batches
+client.upload_collection(
+    collection_name="my_collection",
+    vectors=[[0.1*i, 0.2*i, 0.3*i] for i in range(1, 1001)],
+    payload=[{"index": i} for i in range(1, 1001)],
+    ids=list(range(1, 1001))
+)
+```
+
+</CodeGroup>
+
+<Note>
+  The batch format is more efficient for large uploads as it avoids repeating field names.
+</Note>
+
+## Batch Update Operations
+
+Perform multiple update operations (upsert, delete, update payload, etc.) in a single request.
+
+### API Endpoint
+
+```
+POST /collections/{collection_name}/points/batch
+```
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/batch \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "operations": [
+      {
+        "upsert": {
+          "points": [
+            {"id": 1, "vector": [0.1, 0.2, 0.3], "payload": {"city": "Berlin"}},
+            {"id": 2, "vector": [0.2, 0.3, 0.4], "payload": {"city": "London"}}
+          ]
+        }
+      },
+      {
+        "update_vectors": {
+          "points": [
+            {"id": 3, "vector": [0.3, 0.4, 0.5]}
+          ]
+        }
+      },
+      {
+        "set_payload": {
+          "payload": {"status": "active"},
+          "points": [1, 2, 3]
+        }
+      },
+      {
+        "delete": {
+          "points": [10, 11, 12]
+        }
+      }
+    ]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    PointStruct,
+    UpdateOperation,
+    UpsertOperation,
+    SetPayloadOperation,
+    DeleteOperation
+)
+
+client = QdrantClient(url="http://localhost:6333")
+
+operations = [
+    # Upsert points
+    UpsertOperation(
+        upsert=[
+            PointStruct(id=1, vector=[0.1, 0.2, 0.3], payload={"city": "Berlin"}),
+            PointStruct(id=2, vector=[0.2, 0.3, 0.4], payload={"city": "London"})
+        ]
+    ),
+    # Update payload
+    SetPayloadOperation(
+        set_payload={
+            "payload": {"status": "active"},
+            "points": [1, 2]
+        }
+    ),
+    # Delete points
+    DeleteOperation(
+        delete=[10, 11, 12]
+    )
+]
+
+client.batch_update_points(
+    collection_name="my_collection",
+    update_operations=operations
+)
+```
+
+</CodeGroup>
+
+### Supported Operations
+
+<ParamField path="operations[].upsert" type="object">
+  Insert or update points.
+</ParamField>
+
+<ParamField path="operations[].delete" type="object">
+  Delete points by IDs or filter.
+</ParamField>
+
+<ParamField path="operations[].set_payload" type="object">
+  Set or merge payload for specified points.
+</ParamField>
+
+<ParamField path="operations[].overwrite_payload" type="object">
+  Replace entire payload for specified points.
+</ParamField>
+
+<ParamField path="operations[].delete_payload" type="object">
+  Delete specific payload fields.
+</ParamField>
+
+<ParamField path="operations[].clear_payload" type="object">
+  Remove all payload from specified points.
+</ParamField>
+
+<ParamField path="operations[].update_vectors" type="object">
+  Update vectors for existing points.
+</ParamField>
+
+<ParamField path="operations[].delete_vectors" type="object">
+  Delete specific named vectors.
+</ParamField>
+
+## Batch Delete
+
+Delete multiple points at once.
+
+### API Endpoint
+
+```
+POST /collections/{collection_name}/points/delete
+```
+
+### Delete by IDs
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/delete \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [1, 2, 3, 5, 8, 13, 21]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.delete(
+    collection_name="my_collection",
+    points_selector=[1, 2, 3, 5, 8, 13, 21]
+)
+```
+
+</CodeGroup>
+
+### Delete by Filter
+
+Delete all points matching a filter condition.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/delete \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "filter": {
+      "must": [
+        {
+          "key": "status",
+          "match": {"value": "inactive"}
+        }
+      ]
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.delete(
+    collection_name="my_collection",
+    points_selector=Filter(
+        must=[
+            FieldCondition(
+                key="status",
+                match=MatchValue(value="inactive")
+            )
+        ]
+    )
+)
+```
+
+</CodeGroup>
+
+<Warning>
+  Deleting by filter can affect many points. Use with caution in production environments.
+</Warning>
+
+## Scroll API - Iterate Through Points
+
+The scroll API allows you to iterate through all points in a collection, which is useful for exporting data or processing large datasets.
+
+### API Endpoint
+
+```
+POST /collections/{collection_name}/points/scroll
+```
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/scroll \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "limit": 100,
+    "with_payload": true,
+    "with_vector": false
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+# Simple scroll
+result, next_offset = client.scroll(
+    collection_name="my_collection",
+    limit=100,
+    with_payload=True,
+    with_vectors=False
+)
+
+print(f"Retrieved {len(result)} points")
+print(f"Next offset: {next_offset}")
+```
+
+</CodeGroup>
+
+### Scroll Parameters
+
+<ParamField path="offset" type="integer | string">
+  Start scrolling from this offset. Use the `next_page_offset` from the previous response.
+</ParamField>
+
+<ParamField path="limit" type="integer" default="10">
+  Maximum number of points to return per request.
+</ParamField>
+
+<ParamField path="with_payload" type="boolean | array" default="true">
+  Include payload in results. Can be `true`, `false`, or array of specific fields.
+</ParamField>
+
+<ParamField path="with_vector" type="boolean | array" default="false">
+  Include vectors in results.
+</ParamField>
+
+<ParamField path="filter" type="object">
+  Filter conditions to apply during scrolling.
+</ParamField>
+
+### Paginate Through All Points
+
+<CodeGroup>
+
+```python Python Client - Full Collection Scan
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+all_points = []
+offset = None
+
+while True:
+    result, offset = client.scroll(
+        collection_name="my_collection",
+        limit=100,
+        offset=offset,
+        with_payload=True,
+        with_vectors=False
+    )
+    
+    all_points.extend(result)
+    
+    if offset is None:
+        break  # No more points
+
+print(f"Total points retrieved: {len(all_points)}")
+```
+
+```bash REST API - Paginated Requests
+# First request
+curl -X POST http://localhost:6333/collections/my_collection/points/scroll \
+  -H 'Content-Type: application/json' \
+  -d '{"limit": 100}'
+
+# Response includes next_page_offset, use it for next request
+curl -X POST http://localhost:6333/collections/my_collection/points/scroll \
+  -H 'Content-Type: application/json' \
+  -d '{"limit": 100, "offset": 100}'
+```
+
+</CodeGroup>
+
+### Scroll with Filters
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/scroll \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "limit": 50,
+    "filter": {
+      "must": [
+        {
+          "key": "country",
+          "match": {"value": "Germany"}
+        }
+      ]
+    },
+    "with_payload": ["city", "population"],
+    "with_vector": false
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+client = QdrantClient(url="http://localhost:6333")
+
+result, offset = client.scroll(
+    collection_name="my_collection",
+    scroll_filter=Filter(
+        must=[
+            FieldCondition(
+                key="country",
+                match=MatchValue(value="Germany")
+            )
+        ]
+    ),
+    limit=50,
+    with_payload=["city", "population"],
+    with_vectors=False
+)
+```
+
+</CodeGroup>
+
+## Response Format
+
+### Batch Upsert Response
+
+```json
+{
+  "result": {
+    "operation_id": 123,
+    "status": "completed"
+  },
+  "status": "ok",
+  "time": 0.045
+}
+```
+
+### Batch Update Response
+
+```json
+{
+  "result": [
+    {
+      "operation_id": 124,
+      "status": "completed"
+    },
+    {
+      "operation_id": 125,
+      "status": "completed"
+    },
+    {
+      "operation_id": 126,
+      "status": "completed"
+    }
+  ],
+  "status": "ok",
+  "time": 0.067
+}
+```
+
+### Scroll Response
+
+```json
+{
+  "result": {
+    "points": [
+      {
+        "id": 1,
+        "payload": {"city": "Berlin"},
+        "vector": null
+      },
+      {
+        "id": 2,
+        "payload": {"city": "London"},
+        "vector": null
+      }
+    ],
+    "next_page_offset": 100
+  },
+  "status": "ok",
+  "time": 0.003
+}
+```
+
+<ResponseField name="result.points" type="array">
+  Array of retrieved points.
+</ResponseField>
+
+<ResponseField name="result.next_page_offset" type="integer | null">
+  Offset for the next page. `null` means no more points.
+</ResponseField>
+
+## Query Parameters
+
+<ParamField query="wait" type="boolean" default="true">
+  Wait for the operation to complete before returning.
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Ordering guarantees: `weak`, `medium`, or `strong`.
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Operation timeout in seconds.
+</ParamField>
+
+## Best Practices
+
+1. **Batch Size**: Use batch sizes of 100-1000 points for optimal performance
+2. **Wait Parameter**: Set `wait=false` for bulk operations to improve throughput
+3. **Scroll Limit**: Keep scroll limit reasonable (100-1000) to balance memory and network
+4. **Error Handling**: Implement retry logic for failed batch operations
+5. **Memory Management**: Process scroll results in chunks to avoid memory issues
+6. **Parallel Processing**: For very large datasets, consider parallel scroll operations with filters
+
+<Note>
+  Batch operations are atomic - either all operations succeed or all fail.
+</Note>

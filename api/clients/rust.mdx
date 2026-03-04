@@ -1,0 +1,834 @@
+---
+title: Rust Client
+description: Official Rust client for Qdrant with native gRPC support, zero-copy operations, and high performance
+---
+
+## Installation
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+qdrant-client = "1.11"
+tokio = { version = "1", features = ["full"] }
+```
+
+## Quick Start
+
+```rust
+use qdrant_client::{
+    client::QdrantClient,
+    qdrant::{
+        vectors_config::Config, CreateCollection, Distance, PointStruct,
+        SearchPoints, UpsertPoints, VectorParams, VectorsConfig,
+    },
+};
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Connect to Qdrant
+    let client = QdrantClient::from_url("http://localhost:6334")
+        .build()
+        .await?;
+
+    // Create collection
+    client
+        .create_collection(&CreateCollection {
+            collection_name: "my_collection".into(),
+            vectors_config: Some(VectorsConfig {
+                config: Some(Config::Params(VectorParams {
+                    size: 384,
+                    distance: Distance::Cosine.into(),
+                    ..Default::default()
+                })),
+            }),
+            ..Default::default()
+        })
+        .await?;
+
+    // Upsert points
+    client
+        .upsert_points_blocking(
+            "my_collection",
+            vec![
+                PointStruct::new(
+                    1,
+                    vec![0.05, 0.61, 0.76, 0.74],
+                    json!({"city": "Berlin", "country": "Germany"}).try_into()?,
+                ),
+                PointStruct::new(
+                    2,
+                    vec![0.19, 0.81, 0.75, 0.11],
+                    json!({"city": "London", "country": "UK"}).try_into()?,
+                ),
+            ],
+            None,
+        )
+        .await?;
+
+    // Search
+    let search_result = client
+        .search_points(&SearchPoints {
+            collection_name: "my_collection".into(),
+            vector: vec![0.2, 0.1, 0.9, 0.7],
+            limit: 3,
+            with_payload: Some(true.into()),
+            ..Default::default()
+        })
+        .await?;
+
+    for point in search_result.result {
+        println!("ID: {:?}, Score: {}", point.id, point.score);
+        println!("Payload: {:?}", point.payload);
+    }
+
+    Ok(())
+}
+```
+
+## Repository
+
+<Card title="GitHub Repository" icon="github" href="https://github.com/qdrant/rust-client">
+  Official Rust client: `qdrant/rust-client`
+</Card>
+
+## Client Initialization
+
+### Basic Connection
+
+```rust
+use qdrant_client::client::QdrantClient;
+
+// Connect via gRPC (default)
+let client = QdrantClient::from_url("http://localhost:6334")
+    .build()
+    .await?;
+
+// Connect with API key
+let client = QdrantClient::from_url("https://your-cluster.cloud.qdrant.io")
+    .api_key("your-api-key")
+    .build()
+    .await?;
+```
+
+### With Custom Configuration
+
+```rust
+use qdrant_client::client::{QdrantClient, QdrantClientConfig};
+use std::time::Duration;
+
+let config = QdrantClientConfig::from_url("http://localhost:6334")
+    .timeout(Duration::from_secs(30))
+    .api_key(Some("your-api-key".to_string()))
+    .compression(Some(tonic::codec::CompressionEncoding::Gzip));
+
+let client = QdrantClient::new(Some(config)).await?;
+```
+
+## Collection Management
+
+### Create Collection
+
+```rust
+use qdrant_client::qdrant::{
+    vectors_config::Config, CreateCollection, Distance, HnswConfigDiff,
+    VectorParams, VectorsConfig,
+};
+
+client
+    .create_collection(&CreateCollection {
+        collection_name: "my_collection".into(),
+        vectors_config: Some(VectorsConfig {
+            config: Some(Config::Params(VectorParams {
+                size: 768,
+                distance: Distance::Cosine.into(),
+                hnsw_config: Some(HnswConfigDiff {
+                    m: Some(16),
+                    ef_construct: Some(100),
+                    full_scan_threshold: Some(10000),
+                    ..Default::default()
+                }),
+                on_disk: Some(false),
+                ..Default::default()
+            })),
+        }),
+        replication_factor: Some(2),
+        write_consistency_factor: Some(1),
+        ..Default::default()
+    })
+    .await?;
+```
+
+### Create with Multiple Vectors
+
+```rust
+use qdrant_client::qdrant::{
+    vectors_config::Config, CreateCollection, Distance, VectorParams,
+    VectorParamsMap, VectorsConfig,
+};
+use std::collections::HashMap;
+
+let mut vectors_map = HashMap::new();
+vectors_map.insert(
+    "text".to_string(),
+    VectorParams {
+        size: 768,
+        distance: Distance::Cosine.into(),
+        ..Default::default()
+    },
+);
+vectors_map.insert(
+    "image".to_string(),
+    VectorParams {
+        size: 512,
+        distance: Distance::Euclid.into(),
+        ..Default::default()
+    },
+);
+
+client
+    .create_collection(&CreateCollection {
+        collection_name: "multi_vector".into(),
+        vectors_config: Some(VectorsConfig {
+            config: Some(Config::ParamsMap(VectorParamsMap {
+                map: vectors_map,
+            })),
+        }),
+        ..Default::default()
+    })
+    .await?;
+```
+
+### Get Collection Info
+
+```rust
+let info = client.collection_info("my_collection").await?;
+
+println!("Status: {:?}", info.status);
+println!("Vectors count: {:?}", info.vectors_count);
+println!("Points count: {:?}", info.points_count);
+```
+
+### List Collections
+
+```rust
+let collections = client.list_collections().await?;
+
+for collection in collections.collections {
+    println!("Collection: {}", collection.name);
+}
+```
+
+### Delete Collection
+
+```rust
+client.delete_collection("my_collection").await?;
+```
+
+## Point Operations
+
+### Upsert Points
+
+```rust
+use qdrant_client::qdrant::{PointStruct, UpsertPoints};
+use serde_json::json;
+
+let points = vec![
+    PointStruct::new(
+        1,
+        vec![0.05, 0.61, 0.76, 0.74],
+        json!({
+            "title": "Document 1",
+            "category": "technology",
+            "views": 1500
+        })
+        .try_into()?,
+    ),
+    PointStruct::new(
+        2,
+        vec![0.19, 0.81, 0.75, 0.11],
+        json!({"title": "Document 2"}).try_into()?,
+    ),
+];
+
+client
+    .upsert_points_blocking("my_collection", points, None)
+    .await?;
+```
+
+### Upsert with UUID
+
+```rust
+use qdrant_client::qdrant::{point_id::PointIdOptions, PointId, PointStruct};
+use uuid::Uuid;
+
+let id = Uuid::new_v4();
+let point = PointStruct::new(
+    PointId {
+        point_id_options: Some(PointIdOptions::Uuid(id.to_string())),
+    },
+    vec![0.1, 0.2, 0.3],
+    json!({"key": "value"}).try_into()?,
+);
+
+client
+    .upsert_points_blocking("my_collection", vec![point], None)
+    .await?;
+```
+
+### Batch Upsert
+
+```rust
+use qdrant_client::qdrant::PointStruct;
+use serde_json::json;
+
+let batch_size = 100;
+let total_points = 10000;
+
+for batch_start in (0..total_points).step_by(batch_size) {
+    let points: Vec<PointStruct> = (batch_start..batch_start + batch_size)
+        .map(|i| {
+            PointStruct::new(
+                i as u64,
+                vec![0.1; 384], // Random vectors in production
+                json!({"index": i}).try_into().unwrap(),
+            )
+        })
+        .collect();
+
+    client
+        .upsert_points("my_collection", points, None)
+        .await?;
+}
+```
+
+### Get Points
+
+```rust
+use qdrant_client::qdrant::{GetPoints, PointId};
+
+let points = client
+    .get_points(
+        "my_collection",
+        &[1u64.into(), 2u64.into(), 3u64.into()],
+        Some(true),  // with_payload
+        Some(true),  // with_vectors
+        None,
+    )
+    .await?;
+
+for point in points.result {
+    println!("ID: {:?}", point.id);
+    println!("Vector: {:?}", point.vectors);
+    println!("Payload: {:?}", point.payload);
+}
+```
+
+### Delete Points
+
+```rust
+use qdrant_client::qdrant::{
+    points_selector::PointsSelectorOneOf, Condition, Filter, PointsIdsList,
+    PointsSelector,
+};
+
+// Delete by IDs
+client
+    .delete_points(
+        "my_collection",
+        &[1u64.into(), 2u64.into(), 3u64.into()],
+        None,
+    )
+    .await?;
+
+// Delete by filter
+client
+    .delete_points_blocking(
+        "my_collection",
+        &PointsSelector {
+            points_selector_one_of: Some(PointsSelectorOneOf::Filter(Filter {
+                must: vec![Condition::matches(
+                    "category",
+                    "outdated".to_string(),
+                )],
+                ..Default::default()
+            })),
+        },
+        None,
+    )
+    .await?;
+```
+
+## Search Operations
+
+### Basic Search
+
+```rust
+use qdrant_client::qdrant::SearchPoints;
+
+let search_result = client
+    .search_points(&SearchPoints {
+        collection_name: "my_collection".into(),
+        vector: vec![0.2, 0.1, 0.9, 0.7],
+        limit: 10,
+        with_payload: Some(true.into()),
+        with_vectors: Some(false.into()),
+        ..Default::default()
+    })
+    .await?;
+
+for point in search_result.result {
+    println!("ID: {:?}, Score: {}", point.id, point.score);
+    println!("Payload: {:?}", point.payload);
+}
+```
+
+### Search with Filtering
+
+```rust
+use qdrant_client::qdrant::{Condition, Filter, Range, SearchPoints};
+
+let search_result = client
+    .search_points(&SearchPoints {
+        collection_name: "my_collection".into(),
+        vector: vec![0.2, 0.1, 0.9, 0.7],
+        filter: Some(Filter {
+            must: vec![
+                Condition::matches("category", "technology".to_string()),
+                Condition::range("views", Range {
+                    gte: Some(1000.0),
+                    lt: Some(10000.0),
+                    ..Default::default()
+                }),
+            ],
+            ..Default::default()
+        }),
+        limit: 5,
+        score_threshold: Some(0.7),
+        ..Default::default()
+    })
+    .await?;
+```
+
+### Search with Parameters
+
+```rust
+use qdrant_client::qdrant::{SearchParams, SearchPoints, QuantizationSearchParams};
+
+let search_result = client
+    .search_points(&SearchPoints {
+        collection_name: "my_collection".into(),
+        vector: vec![0.2, 0.1, 0.9, 0.7],
+        limit: 20,
+        params: Some(SearchParams {
+            hnsw_ef: Some(128),
+            exact: Some(false),
+            quantization: Some(QuantizationSearchParams {
+                ignore: Some(false),
+                rescore: Some(true),
+                oversampling: Some(2.0),
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+    .await?;
+```
+
+### Batch Search
+
+```rust
+use qdrant_client::qdrant::{SearchBatchPoints, SearchPoints};
+
+let search_result = client
+    .search_batch_points(&SearchBatchPoints {
+        collection_name: "my_collection".into(),
+        search_points: vec![
+            SearchPoints {
+                vector: vec![0.2, 0.1, 0.9],
+                limit: 5,
+                ..Default::default()
+            },
+            SearchPoints {
+                vector: vec![0.5, 0.3, 0.2],
+                limit: 10,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    })
+    .await?;
+
+for (i, batch) in search_result.result.iter().enumerate() {
+    println!("Results for query {}:", i);
+    for point in &batch.result {
+        println!("  ID: {:?}, Score: {}", point.id, point.score);
+    }
+}
+```
+
+## Recommendations
+
+```rust
+use qdrant_client::qdrant::RecommendPoints;
+
+let recommend_result = client
+    .recommend(&RecommendPoints {
+        collection_name: "my_collection".into(),
+        positive: vec![1u64.into(), 2u64.into(), 3u64.into()],
+        negative: vec![10u64.into()],
+        limit: 10,
+        with_payload: Some(true.into()),
+        ..Default::default()
+    })
+    .await?;
+
+for point in recommend_result.result {
+    println!("ID: {:?}, Score: {}", point.id, point.score);
+}
+```
+
+## Query API (Universal)
+
+```rust
+use qdrant_client::qdrant::{
+    query::Query as QueryEnum, vector_input::Variant, PrefetchQuery, Query,
+    QueryPoints, VectorInput,
+};
+
+let query_result = client
+    .query(&QueryPoints {
+        collection_name: "my_collection".into(),
+        query: Some(Query {
+            variant: Some(QueryEnum::Nearest(VectorInput {
+                variant: Some(Variant::Dense(vec![0.1, 0.2, 0.3].into())),
+            })),
+        }),
+        limit: Some(10),
+        with_payload: Some(true.into()),
+        ..Default::default()
+    })
+    .await?;
+```
+
+## Payload Operations
+
+### Set Payload
+
+```rust
+use qdrant_client::qdrant::{points_selector::PointsSelectorOneOf, PointsIdsList, PointsSelector};
+use serde_json::json;
+
+client
+    .set_payload(
+        "my_collection",
+        &[1u64.into(), 2u64.into()],
+        json!({
+            "new_field": "value",
+            "updated_at": "2024-01-01"
+        })
+        .try_into()?,
+        None,
+    )
+    .await?;
+```
+
+### Overwrite Payload
+
+```rust
+client
+    .overwrite_payload(
+        "my_collection",
+        &[1u64.into(), 2u64.into()],
+        json!({"only_field": "value"}).try_into()?,
+        None,
+    )
+    .await?;
+```
+
+### Delete Payload Keys
+
+```rust
+client
+    .delete_payload(
+        "my_collection",
+        &[1u64.into(), 2u64.into()],
+        vec!["old_field".to_string(), "deprecated".to_string()],
+        None,
+    )
+    .await?;
+```
+
+### Clear Payload
+
+```rust
+client
+    .clear_payload(
+        "my_collection",
+        &[1u64.into(), 2u64.into()],
+        None,
+    )
+    .await?;
+```
+
+## Scroll (Pagination)
+
+```rust
+use qdrant_client::qdrant::{point_id::PointIdOptions, PointId, ScrollPoints};
+
+let mut offset: Option<PointId> = None;
+let mut all_points = Vec::new();
+
+loop {
+    let scroll_result = client
+        .scroll(&ScrollPoints {
+            collection_name: "my_collection".into(),
+            limit: Some(100),
+            offset: offset.clone(),
+            with_payload: Some(true.into()),
+            ..Default::default()
+        })
+        .await?;
+
+    all_points.extend(scroll_result.result);
+    
+    if let Some(next_offset) = scroll_result.next_page_offset {
+        offset = Some(next_offset);
+    } else {
+        break;
+    }
+}
+
+println!("Total points: {}", all_points.len());
+```
+
+## Payload Indexing
+
+```rust
+use qdrant_client::qdrant::{
+    payload_index_params::IndexParams, CreateFieldIndexCollection, FieldType,
+    KeywordIndexParams, PayloadIndexParams, TextIndexParams, TokenizerType,
+};
+
+// Create keyword index
+client
+    .create_field_index(
+        "my_collection",
+        "category",
+        FieldType::Keyword,
+        Some(&PayloadIndexParams {
+            index_params: Some(IndexParams::KeywordIndexParams(KeywordIndexParams {
+                ..Default::default()
+            })),
+        }),
+        None,
+    )
+    .await?;
+
+// Create text index
+client
+    .create_field_index(
+        "my_collection",
+        "description",
+        FieldType::Text,
+        Some(&PayloadIndexParams {
+            index_params: Some(IndexParams::TextIndexParams(TextIndexParams {
+                tokenizer: TokenizerType::Word.into(),
+                lowercase: Some(true),
+                min_token_len: Some(2),
+                max_token_len: Some(20),
+                ..Default::default()
+            })),
+        }),
+        None,
+    )
+    .await?;
+
+// Delete index
+client
+    .delete_field_index("my_collection", "category", None)
+    .await?;
+```
+
+## Snapshots
+
+```rust
+// Create snapshot
+let snapshot = client.create_snapshot("my_collection").await?;
+println!("Snapshot name: {}", snapshot.name);
+
+// List snapshots
+let snapshots = client.list_snapshots("my_collection").await?;
+for snapshot in snapshots {
+    println!("Snapshot: {}", snapshot.name);
+}
+```
+
+## Count Points
+
+```rust
+use qdrant_client::qdrant::{Condition, CountPoints, Filter};
+
+// Count all points
+let count = client
+    .count(&CountPoints {
+        collection_name: "my_collection".into(),
+        exact: Some(true),
+        ..Default::default()
+    })
+    .await?;
+
+println!("Total points: {:?}", count.result.map(|r| r.count));
+
+// Count with filter
+let count = client
+    .count(&CountPoints {
+        collection_name: "my_collection".into(),
+        filter: Some(Filter {
+            must: vec![Condition::matches("category", "technology".to_string())],
+            ..Default::default()
+        }),
+        exact: Some(true),
+        ..Default::default()
+    })
+    .await?;
+```
+
+## Error Handling
+
+```rust
+use qdrant_client::client::QdrantClient;
+use qdrant_client::qdrant::QdrantError;
+
+let client = QdrantClient::from_url("http://localhost:6334")
+    .build()
+    .await?;
+
+match client.collection_info("nonexistent").await {
+    Ok(info) => println!("Collection info: {:?}", info),
+    Err(e) => {
+        eprintln!("Error: {}", e);
+        // Handle specific error types
+        if e.to_string().contains("Not found") {
+            eprintln!("Collection not found");
+        }
+    }
+}
+```
+
+## Type Safety
+
+The Rust client provides strong type safety:
+
+```rust
+use qdrant_client::qdrant::{
+    Distance, PointStruct, ScoredPoint, VectorParams,
+};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DocumentPayload {
+    title: String,
+    category: String,
+    views: i64,
+    tags: Vec<String>,
+}
+
+// Type-safe point creation
+let payload = DocumentPayload {
+    title: "Document 1".to_string(),
+    category: "technology".to_string(),
+    views: 1500,
+    tags: vec!["ai".to_string(), "ml".to_string()],
+};
+
+let point = PointStruct::new(
+    1,
+    vec![0.1, 0.2, 0.3],
+    serde_json::to_value(payload)?.try_into()?,
+);
+
+// Type-safe payload extraction
+let search_result = client
+    .search_points(&SearchPoints {
+        collection_name: "my_collection".into(),
+        vector: vec![0.2, 0.1, 0.9],
+        limit: 10,
+        with_payload: Some(true.into()),
+        ..Default::default()
+    })
+    .await?;
+
+for scored_point in search_result.result {
+    if let Some(payload) = scored_point.payload.get("title") {
+        println!("Title: {:?}", payload);
+    }
+}
+```
+
+## Async Runtime
+
+The client requires an async runtime (Tokio):
+
+```rust
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = QdrantClient::from_url("http://localhost:6334")
+        .build()
+        .await?;
+
+    // Your async operations here
+    
+    Ok(())
+}
+
+// Or use tokio::spawn for concurrent operations
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = QdrantClient::from_url("http://localhost:6334")
+        .build()
+        .await?;
+
+    let handle1 = tokio::spawn(async move {
+        // Operation 1
+    });
+
+    let handle2 = tokio::spawn(async move {
+        // Operation 2
+    });
+
+    tokio::try_join!(handle1, handle2)?;
+    
+    Ok(())
+}
+```
+
+## Best Practices
+
+<Tip>
+  **Performance optimization:**
+  - Use batch operations for bulk inserts
+  - Leverage zero-copy gRPC for large payloads
+  - Reuse client connections across requests
+  - Use async/await for concurrent operations
+</Tip>
+
+<Warning>
+  **Common pitfalls:**
+  - Always handle Result types properly
+  - Use appropriate point ID types (u64 or UUID string)
+  - Ensure vector dimensions match collection config
+  - Handle pagination properly with scroll operations
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Go Client" icon="golang" href="/api/clients/go">
+    Go client documentation
+  </Card>
+  <Card title="gRPC API" icon="bolt" href="/api/grpc/overview">
+    Learn about gRPC protocol
+  </Card>
+</CardGroup>

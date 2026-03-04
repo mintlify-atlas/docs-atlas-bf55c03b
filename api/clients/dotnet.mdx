@@ -1,0 +1,873 @@
+---
+title: .NET Client
+description: Official .NET client for Qdrant with full async support, LINQ integration, and strongly-typed C# interfaces
+---
+
+## Installation
+
+Install via NuGet:
+
+```bash
+dotnet add package Qdrant.Client
+```
+
+Or via Package Manager:
+
+```powershell
+Install-Package Qdrant.Client
+```
+
+## Quick Start
+
+```csharp
+using Qdrant.Client;
+using Qdrant.Client.Grpc;
+
+// Connect to Qdrant
+var client = new QdrantClient("localhost", 6334);
+
+// Create collection
+await client.CreateCollectionAsync(
+    collectionName: "my_collection",
+    vectorsConfig: new VectorParams
+    {
+        Size = 384,
+        Distance = Distance.Cosine
+    }
+);
+
+// Upsert points
+await client.UpsertAsync(
+    collectionName: "my_collection",
+    points: new[]
+    {
+        new PointStruct
+        {
+            Id = 1,
+            Vectors = new[] { 0.05f, 0.61f, 0.76f, 0.74f },
+            Payload =
+            {
+                ["city"] = "Berlin",
+                ["country"] = "Germany"
+            }
+        },
+        new PointStruct
+        {
+            Id = 2,
+            Vectors = new[] { 0.19f, 0.81f, 0.75f, 0.11f },
+            Payload =
+            {
+                ["city"] = "London",
+                ["country"] = "UK"
+            }
+        }
+    }
+);
+
+// Search
+var searchResults = await client.SearchAsync(
+    collectionName: "my_collection",
+    vector: new[] { 0.2f, 0.1f, 0.9f, 0.7f },
+    limit: 3
+);
+
+foreach (var result in searchResults)
+{
+    Console.WriteLine($"ID: {result.Id}, Score: {result.Score}");
+    Console.WriteLine($"Payload: {result.Payload}");
+}
+```
+
+## Repository
+
+<Card title="GitHub Repository" icon="github" href="https://github.com/qdrant/qdrant-dotnet">
+  Official .NET client: `qdrant/qdrant-dotnet`
+</Card>
+
+## Client Initialization
+
+### Basic Connection
+
+```csharp
+using Qdrant.Client;
+
+// Connect via gRPC (recommended)
+var client = new QdrantClient(host: "localhost", port: 6334);
+
+// Connect to Qdrant Cloud
+var cloudClient = new QdrantClient(
+    host: "your-cluster.cloud.qdrant.io",
+    port: 6334,
+    https: true,
+    apiKey: "your-api-key"
+);
+```
+
+### With Custom Options
+
+```csharp
+using Grpc.Core;
+using Qdrant.Client;
+
+var channelOptions = new GrpcChannelOptions
+{
+    MaxReceiveMessageSize = 100 * 1024 * 1024, // 100MB
+    MaxSendMessageSize = 100 * 1024 * 1024
+};
+
+var client = new QdrantClient(
+    host: "localhost",
+    port: 6334,
+    grpcChannelOptions: channelOptions
+);
+```
+
+## Collection Management
+
+### Create Collection
+
+```csharp
+using Qdrant.Client.Grpc;
+
+await client.CreateCollectionAsync(
+    collectionName: "my_collection",
+    vectorsConfig: new VectorParams
+    {
+        Size = 768,
+        Distance = Distance.Cosine,
+        OnDisk = false,
+        HnswConfig = new HnswConfigDiff
+        {
+            M = 16,
+            EfConstruct = 100,
+            FullScanThreshold = 10000
+        }
+    },
+    replicationFactor: 2,
+    writeConsistencyFactor: 1
+);
+```
+
+### Create with Multiple Vectors
+
+```csharp
+await client.CreateCollectionAsync(
+    collectionName: "multi_vector",
+    vectorsConfig: new VectorParamsMap
+    {
+        Map =
+        {
+            ["text"] = new VectorParams
+            {
+                Size = 768,
+                Distance = Distance.Cosine
+            },
+            ["image"] = new VectorParams
+            {
+                Size = 512,
+                Distance = Distance.Euclid
+            }
+        }
+    }
+);
+```
+
+### Get Collection Info
+
+```csharp
+var info = await client.GetCollectionInfoAsync("my_collection");
+
+Console.WriteLine($"Status: {info.Status}");
+Console.WriteLine($"Vectors count: {info.VectorsCount}");
+Console.WriteLine($"Points count: {info.PointsCount}");
+Console.WriteLine($"Segments: {info.SegmentsCount}");
+```
+
+### List Collections
+
+```csharp
+var collections = await client.ListCollectionsAsync();
+
+foreach (var collection in collections)
+{
+    Console.WriteLine(collection.Name);
+}
+```
+
+### Update Collection
+
+```csharp
+await client.UpdateCollectionAsync(
+    collectionName: "my_collection",
+    optimizersConfig: new OptimizersConfigDiff
+    {
+        IndexingThreshold = 50000,
+        MemmapThreshold = 100000
+    }
+);
+```
+
+### Delete Collection
+
+```csharp
+await client.DeleteCollectionAsync("my_collection");
+```
+
+## Point Operations
+
+### Upsert Points
+
+```csharp
+using Qdrant.Client.Grpc;
+
+await client.UpsertAsync(
+    collectionName: "my_collection",
+    points: new[]
+    {
+        new PointStruct
+        {
+            Id = new PointId { Num = 1 },
+            Vectors = new[] { 0.05f, 0.61f, 0.76f, 0.74f },
+            Payload =
+            {
+                ["title"] = "Document 1",
+                ["category"] = "technology",
+                ["views"] = 1500,
+                ["tags"] = new[] { "ai", "ml", "vector-db" }
+            }
+        },
+        new PointStruct
+        {
+            Id = new PointId { Num = 2 },
+            Vectors = new[] { 0.19f, 0.81f, 0.75f, 0.11f },
+            Payload = { ["title"] = "Document 2" }
+        }
+    },
+    wait: true
+);
+```
+
+### Upsert with GUID
+
+```csharp
+var id = Guid.NewGuid();
+
+await client.UpsertAsync(
+    collectionName: "my_collection",
+    points: new[]
+    {
+        new PointStruct
+        {
+            Id = new PointId { Uuid = id.ToString() },
+            Vectors = new[] { 0.1f, 0.2f, 0.3f },
+            Payload = { ["key"] = "value" }
+        }
+    }
+);
+```
+
+### Batch Upsert
+
+```csharp
+const int batchSize = 100;
+const int totalPoints = 10000;
+
+for (int i = 0; i < totalPoints; i += batchSize)
+{
+    var points = Enumerable.Range(i, batchSize)
+        .Select(j => new PointStruct
+        {
+            Id = new PointId { Num = (ulong)j },
+            Vectors = Enumerable.Range(0, 384).Select(_ => (float)Random.Shared.NextDouble()).ToArray(),
+            Payload = { ["index"] = j }
+        })
+        .ToArray();
+
+    await client.UpsertAsync(
+        collectionName: "my_collection",
+        points: points,
+        wait: false // Don't wait for faster throughput
+    );
+}
+```
+
+### Get Points
+
+```csharp
+var points = await client.RetrieveAsync(
+    collectionName: "my_collection",
+    ids: new[] { 1ul, 2ul, 3ul },
+    withPayload: true,
+    withVectors: true
+);
+
+foreach (var point in points)
+{
+    Console.WriteLine($"ID: {point.Id}");
+    Console.WriteLine($"Vectors: {string.Join(", ", point.Vectors.Vector.Data)}");
+    Console.WriteLine($"Payload: {point.Payload}");
+}
+```
+
+### Delete Points
+
+```csharp
+using Qdrant.Client.Grpc;
+
+// Delete by IDs
+await client.DeleteAsync(
+    collectionName: "my_collection",
+    ids: new[] { 1ul, 2ul, 3ul }
+);
+
+// Delete by filter
+await client.DeleteAsync(
+    collectionName: "my_collection",
+    filter: new Filter
+    {
+        Must =
+        {
+            new Condition
+            {
+                Field = new FieldCondition
+                {
+                    Key = "category",
+                    Match = new Match { Keyword = "outdated" }
+                }
+            }
+        }
+    }
+);
+```
+
+## Search Operations
+
+### Basic Search
+
+```csharp
+var results = await client.SearchAsync(
+    collectionName: "my_collection",
+    vector: new[] { 0.2f, 0.1f, 0.9f, 0.7f },
+    limit: 10,
+    payloadSelector: true,
+    vectorsSelector: false
+);
+
+foreach (var result in results)
+{
+    Console.WriteLine($"ID: {result.Id}, Score: {result.Score}");
+    Console.WriteLine($"Payload: {result.Payload}");
+}
+```
+
+### Search with Filtering
+
+```csharp
+using Qdrant.Client.Grpc;
+
+var results = await client.SearchAsync(
+    collectionName: "my_collection",
+    vector: new[] { 0.2f, 0.1f, 0.9f, 0.7f },
+    filter: new Filter
+    {
+        Must =
+        {
+            new Condition
+            {
+                Field = new FieldCondition
+                {
+                    Key = "category",
+                    Match = new Match { Keyword = "technology" }
+                }
+            },
+            new Condition
+            {
+                Field = new FieldCondition
+                {
+                    Key = "views",
+                    Range = new Range
+                    {
+                        Gte = 1000,
+                        Lt = 10000
+                    }
+                }
+            }
+        }
+    },
+    limit: 5,
+    scoreThreshold: 0.7f
+);
+```
+
+### Search with Parameters
+
+```csharp
+var results = await client.SearchAsync(
+    collectionName: "my_collection",
+    vector: new[] { 0.2f, 0.1f, 0.9f, 0.7f },
+    limit: 20,
+    searchParams: new SearchParams
+    {
+        HnswEf = 128,
+        Exact = false,
+        Quantization = new QuantizationSearchParams
+        {
+            Ignore = false,
+            Rescore = true,
+            Oversampling = 2.0
+        }
+    }
+);
+```
+
+### Batch Search
+
+```csharp
+var searchRequests = new[]
+{
+    new SearchPoints
+    {
+        CollectionName = "my_collection",
+        Vector = { 0.2f, 0.1f, 0.9f },
+        Limit = 5
+    },
+    new SearchPoints
+    {
+        CollectionName = "my_collection",
+        Vector = { 0.5f, 0.3f, 0.2f },
+        Limit = 10
+    }
+};
+
+var batchResults = await client.SearchBatchAsync(
+    collectionName: "my_collection",
+    searches: searchRequests
+);
+
+for (int i = 0; i < batchResults.Length; i++)
+{
+    Console.WriteLine($"Results for query {i}:");
+    foreach (var point in batchResults[i])
+    {
+        Console.WriteLine($"  ID: {point.Id}, Score: {point.Score}");
+    }
+}
+```
+
+## Recommendations
+
+```csharp
+var results = await client.RecommendAsync(
+    collectionName: "my_collection",
+    positiveIds: new[] { 1ul, 2ul, 3ul },
+    negativeIds: new[] { 10ul },
+    limit: 10,
+    payloadSelector: true
+);
+
+foreach (var result in results)
+{
+    Console.WriteLine($"ID: {result.Id}, Score: {result.Score}");
+}
+```
+
+## Query API (Universal)
+
+```csharp
+using Qdrant.Client.Grpc;
+
+var results = await client.QueryAsync(
+    collectionName: "my_collection",
+    query: new float[] { 0.1f, 0.2f, 0.3f, 0.4f },
+    limit: 10,
+    withPayload: true
+);
+
+foreach (var result in results)
+{
+    Console.WriteLine($"ID: {result.Id}, Score: {result.Score}");
+}
+```
+
+## Payload Operations
+
+### Set Payload
+
+```csharp
+await client.SetPayloadAsync(
+    collectionName: "my_collection",
+    payload: new Dictionary<string, Value>
+    {
+        ["new_field"] = "value",
+        ["updated_at"] = "2024-01-01"
+    },
+    ids: new[] { 1ul, 2ul, 3ul }
+);
+```
+
+### Overwrite Payload
+
+```csharp
+await client.OverwritePayloadAsync(
+    collectionName: "my_collection",
+    payload: new Dictionary<string, Value>
+    {
+        ["only_field"] = "value"
+    },
+    ids: new[] { 1ul, 2ul }
+);
+```
+
+### Delete Payload Keys
+
+```csharp
+await client.DeletePayloadAsync(
+    collectionName: "my_collection",
+    keys: new[] { "old_field", "deprecated" },
+    ids: new[] { 1ul, 2ul, 3ul }
+);
+```
+
+### Clear Payload
+
+```csharp
+await client.ClearPayloadAsync(
+    collectionName: "my_collection",
+    ids: new[] { 1ul, 2ul, 3ul }
+);
+```
+
+## Scroll (Pagination)
+
+```csharp
+PointId? offset = null;
+var allPoints = new List<RetrievedPoint>();
+
+while (true)
+{
+    var (points, nextOffset) = await client.ScrollAsync(
+        collectionName: "my_collection",
+        limit: 100,
+        offset: offset,
+        payloadSelector: true
+    );
+
+    allPoints.AddRange(points);
+    offset = nextOffset;
+
+    if (offset == null)
+        break;
+}
+
+Console.WriteLine($"Total points: {allPoints.Count}");
+```
+
+## Payload Indexing
+
+```csharp
+using Qdrant.Client.Grpc;
+
+// Create keyword index
+await client.CreatePayloadIndexAsync(
+    collectionName: "my_collection",
+    fieldName: "category",
+    schemaType: PayloadSchemaType.Keyword
+);
+
+// Create text index
+await client.CreatePayloadIndexAsync(
+    collectionName: "my_collection",
+    fieldName: "description",
+    schemaType: PayloadSchemaType.Text,
+    indexParams: new PayloadIndexParams
+    {
+        TextIndexParams = new TextIndexParams
+        {
+            Tokenizer = TokenizerType.Word,
+            Lowercase = true,
+            MinTokenLen = 2,
+            MaxTokenLen = 20
+        }
+    }
+);
+
+// Delete index
+await client.DeletePayloadIndexAsync(
+    collectionName: "my_collection",
+    fieldName: "category"
+);
+```
+
+## Count Points
+
+```csharp
+var count = await client.CountAsync(
+    collectionName: "my_collection",
+    exact: true
+);
+
+Console.WriteLine($"Total points: {count}");
+
+// Count with filter
+var filteredCount = await client.CountAsync(
+    collectionName: "my_collection",
+    filter: new Filter
+    {
+        Must =
+        {
+            new Condition
+            {
+                Field = new FieldCondition
+                {
+                    Key = "category",
+                    Match = new Match { Keyword = "technology" }
+                }
+            }
+        }
+    },
+    exact: true
+);
+```
+
+## Snapshots
+
+```csharp
+// Create snapshot
+var snapshot = await client.CreateSnapshotAsync("my_collection");
+Console.WriteLine($"Snapshot name: {snapshot.Name}");
+
+// List snapshots
+var snapshots = await client.ListSnapshotsAsync("my_collection");
+foreach (var snap in snapshots)
+{
+    Console.WriteLine($"Snapshot: {snap.Name}");
+}
+```
+
+## Error Handling
+
+```csharp
+using Grpc.Core;
+using Qdrant.Client;
+
+try
+{
+    var info = await client.GetCollectionInfoAsync("nonexistent");
+}
+catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+{
+    Console.WriteLine("Collection not found");
+}
+catch (RpcException ex)
+{
+    Console.WriteLine($"Error: {ex.StatusCode} - {ex.Status.Detail}");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Unexpected error: {ex.Message}");
+}
+```
+
+## Strongly-Typed Payloads
+
+```csharp
+using System.Text.Json;
+
+public class DocumentPayload
+{
+    public string Title { get; set; }
+    public string Category { get; set; }
+    public int Views { get; set; }
+    public List<string> Tags { get; set; }
+}
+
+// Serialize to payload
+var document = new DocumentPayload
+{
+    Title = "Document 1",
+    Category = "technology",
+    Views = 1500,
+    Tags = new List<string> { "ai", "ml" }
+};
+
+var payload = JsonSerializer.SerializeToDocument(document);
+
+await client.UpsertAsync(
+    collectionName: "my_collection",
+    points: new[]
+    {
+        new PointStruct
+        {
+            Id = 1,
+            Vectors = new[] { 0.1f, 0.2f, 0.3f },
+            Payload = { /* Convert from JsonDocument */ }
+        }
+    }
+);
+
+// Deserialize from payload
+var results = await client.SearchAsync(
+    collectionName: "my_collection",
+    vector: new[] { 0.2f, 0.1f, 0.9f },
+    limit: 10
+);
+
+foreach (var result in results)
+{
+    var doc = JsonSerializer.Deserialize<DocumentPayload>(
+        result.Payload.ToString()
+    );
+    Console.WriteLine($"Title: {doc.Title}, Views: {doc.Views}");
+}
+```
+
+## LINQ Integration
+
+```csharp
+using System.Linq;
+
+var results = await client.SearchAsync(
+    collectionName: "my_collection",
+    vector: new[] { 0.2f, 0.1f, 0.9f },
+    limit: 100
+);
+
+// Use LINQ for post-processing
+var topTech = results
+    .Where(r => r.Payload.ContainsKey("category") && 
+                r.Payload["category"].StringValue == "technology")
+    .OrderByDescending(r => r.Score)
+    .Take(10)
+    .Select(r => new
+    {
+        Id = r.Id,
+        Score = r.Score,
+        Title = r.Payload["title"].StringValue
+    });
+
+foreach (var item in topTech)
+{
+    Console.WriteLine($"{item.Title}: {item.Score}");
+}
+```
+
+## Dependency Injection
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Qdrant.Client;
+
+public static class ServiceCollectionExtensions
+{
+    public static IServiceCollection AddQdrantClient(
+        this IServiceCollection services,
+        string host,
+        int port)
+    {
+        services.AddSingleton<QdrantClient>(
+            _ => new QdrantClient(host, port)
+        );
+        return services;
+    }
+}
+
+// Usage in ASP.NET Core
+public class Startup
+{
+    public void ConfigureServices(IServiceCollection services)
+    {
+        services.AddQdrantClient("localhost", 6334);
+    }
+}
+
+// Inject in controller
+public class SearchController : ControllerBase
+{
+    private readonly QdrantClient _client;
+
+    public SearchController(QdrantClient client)
+    {
+        _client = client;
+    }
+
+    [HttpPost("search")]
+    public async Task<IActionResult> Search([FromBody] float[] vector)
+    {
+        var results = await _client.SearchAsync(
+            collectionName: "my_collection",
+            vector: vector,
+            limit: 10
+        );
+        return Ok(results);
+    }
+}
+```
+
+## Async Enumerable
+
+```csharp
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+
+public async IAsyncEnumerable<RetrievedPoint> ScrollAllPointsAsync(
+    QdrantClient client,
+    string collectionName,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+{
+    PointId? offset = null;
+
+    while (!cancellationToken.IsCancellationRequested)
+    {
+        var (points, nextOffset) = await client.ScrollAsync(
+            collectionName: collectionName,
+            limit: 100,
+            offset: offset
+        );
+
+        foreach (var point in points)
+        {
+            yield return point;
+        }
+
+        offset = nextOffset;
+        if (offset == null)
+            break;
+    }
+}
+
+// Usage
+await foreach (var point in ScrollAllPointsAsync(client, "my_collection"))
+{
+    Console.WriteLine($"ID: {point.Id}");
+}
+```
+
+## Best Practices
+
+<Tip>
+  **Performance tips:**
+  - Reuse QdrantClient instances (singleton pattern)
+  - Use async/await throughout your application
+  - Enable connection pooling with gRPC options
+  - Use batch operations for bulk inserts
+  - Set wait=false for faster upserts
+</Tip>
+
+<Warning>
+  **Common issues:**
+  - Always handle RpcException for gRPC errors
+  - Use CancellationToken for long-running operations
+  - Dispose of resources properly (though client is reusable)
+  - Ensure vector dimensions match collection config
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Java Client" icon="java" href="/api/clients/java">
+    Java client documentation
+  </Card>
+  <Card title="gRPC API" icon="bolt" href="/api/grpc/overview">
+    Learn about gRPC protocol
+  </Card>
+</CardGroup>

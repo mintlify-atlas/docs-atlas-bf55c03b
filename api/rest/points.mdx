@@ -1,0 +1,678 @@
+---
+title: Points API
+description: REST API endpoints for managing points (vectors with payloads) in Qdrant collections
+---
+
+Points are the core data structure in Qdrant, consisting of a vector, optional payload, and unique ID. Use these endpoints to insert, retrieve, update, and delete points.
+
+## Upsert Points
+
+Insert or update points in a collection. If a point with the given ID already exists, it will be overwritten.
+
+```bash
+curl -X PUT 'http://localhost:6333/collections/{collection_name}/points' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [
+      {
+        "id": 1,
+        "vector": [0.19, 0.81, 0.75, 0.11],
+        "payload": {"city": "Berlin", "price": 1.99}
+      },
+      {
+        "id": 2,
+        "vector": [0.36, 0.55, 0.47, 0.94],
+        "payload": {"city": "London", "price": 2.99}
+      }
+    ]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to update
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for changes to actually happen. Default is true.
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees: `weak`, `medium`, or `strong`
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="points" type="array" required>
+  List of points to upsert
+  
+  <ParamField body="id" type="integer | string" required>
+    Unique identifier for the point. Can be an integer or UUID string.
+  </ParamField>
+  
+  <ParamField body="vector" type="array | object" required>
+    Vector data. Can be a single vector array, multi-vector array, or named vectors object.
+  </ParamField>
+  
+  <ParamField body="payload" type="object">
+    Optional payload data associated with the point
+  </ParamField>
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="operation_id" type="integer">
+    Operation identifier
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    Update status: `acknowledged` or `completed`
+  </ResponseField>
+</ResponseField>
+
+## Get Point
+
+Retrieve full information about a single point by its ID.
+
+```bash
+curl -X GET 'http://localhost:6333/collections/{collection_name}/points/{id}'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to retrieve from
+</ParamField>
+
+<ParamField path="id" type="integer | string" required>
+  ID of the point to retrieve
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level: `majority`, `quorum`, or `all`
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="id" type="integer | string">
+    Point ID
+  </ResponseField>
+  <ResponseField name="vector" type="array | object">
+    Vector data
+  </ResponseField>
+  <ResponseField name="payload" type="object">
+    Payload data
+  </ResponseField>
+</ResponseField>
+
+## Get Multiple Points
+
+Retrieve multiple points by their IDs.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "ids": [1, 2, 3]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to retrieve from
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="ids" type="array" required>
+  Array of point IDs to retrieve
+</ParamField>
+
+<ParamField body="with_payload" type="boolean | array | object">
+  Whether to return payload. Can be `true`, `false`, array of field names, or include/exclude object.
+</ParamField>
+
+<ParamField body="with_vector" type="boolean | array">
+  Whether to return vectors. Can be `true`, `false`, or array of vector names.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="array">
+  Array of point objects with id, vector, and payload
+</ResponseField>
+
+## Delete Points
+
+Delete points from a collection by ID or filter.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/delete' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [1, 2, 3]
+  }'
+```
+
+Or delete by filter:
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/delete' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "filter": {
+      "must": [
+        {"key": "city", "match": {"value": "London"}}
+      ]
+    }
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to delete from
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for changes to actually happen
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees for the operation
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="points" type="array">
+  Array of point IDs to delete
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter conditions to select points for deletion
+  
+  <ParamField body="must" type="array">
+    All conditions must match
+  </ParamField>
+  
+  <ParamField body="should" type="array">
+    At least one condition must match
+  </ParamField>
+  
+  <ParamField body="must_not" type="array">
+    All conditions must NOT match
+  </ParamField>
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="operation_id" type="integer">
+    Operation identifier
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    Update status
+  </ResponseField>
+</ResponseField>
+
+## Scroll Points
+
+Paginate through all points matching given filtering conditions.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/scroll' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "limit": 10,
+    "with_payload": true,
+    "with_vector": false
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to retrieve from
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="offset" type="integer | string">
+  Start from this point ID. Omit to start from the beginning.
+</ParamField>
+
+<ParamField body="limit" type="integer">
+  Maximum number of points to return. Default is 10.
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter conditions to select points
+</ParamField>
+
+<ParamField body="with_payload" type="boolean | array | object">
+  Whether to return payload
+</ParamField>
+
+<ParamField body="with_vector" type="boolean | array">
+  Whether to return vectors
+</ParamField>
+
+<ParamField body="order_by" type="string">
+  Payload field to order results by
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="points" type="array">
+    Array of point objects
+  </ResponseField>
+  <ResponseField name="next_page_offset" type="integer | string">
+    Offset for the next page, or null if this is the last page
+  </ResponseField>
+</ResponseField>
+
+## Set Payload
+
+Set or update payload values for specific points.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/payload' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "payload": {
+      "property1": "value1",
+      "property2": "value2"
+    },
+    "points": [1, 2, 3]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for changes to actually happen
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees for the operation
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="payload" type="object" required>
+  Payload values to set
+</ParamField>
+
+<ParamField body="points" type="array">
+  Array of point IDs to update
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter to select points for update
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="operation_id" type="integer">
+    Operation identifier
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    Update status
+  </ResponseField>
+</ResponseField>
+
+## Overwrite Payload
+
+Replace the entire payload of points with a new one.
+
+```bash
+curl -X PUT 'http://localhost:6333/collections/{collection_name}/points/payload' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "payload": {
+      "new_field": "new_value"
+    },
+    "points": [1, 2, 3]
+  }'
+```
+
+Parameters are identical to Set Payload, but this operation replaces the entire payload rather than merging.
+
+## Delete Payload
+
+Delete specific payload keys from points.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/payload/delete' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "keys": ["property1", "property2"],
+    "points": [1, 2, 3]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for changes to actually happen
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees for the operation
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="keys" type="array" required>
+  Array of payload keys to delete
+</ParamField>
+
+<ParamField body="points" type="array">
+  Array of point IDs to update
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter to select points for update
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="operation_id" type="integer">
+    Operation identifier
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    Update status
+  </ResponseField>
+</ResponseField>
+
+## Clear Payload
+
+Remove all payload from specified points.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/payload/clear' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [1, 2, 3]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for changes to actually happen
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees for the operation
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="points" type="array">
+  Array of point IDs to clear
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter to select points for clearing
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="operation_id" type="integer">
+    Operation identifier
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    Update status
+  </ResponseField>
+</ResponseField>
+
+## Update Vectors
+
+Update specific named vectors on points while keeping other vectors intact.
+
+```bash
+curl -X PUT 'http://localhost:6333/collections/{collection_name}/points/vectors' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [
+      {
+        "id": 1,
+        "vector": {
+          "image": [0.1, 0.2, 0.3, 0.4]
+        }
+      }
+    ]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for changes to actually happen
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees for the operation
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="points" type="array" required>
+  Array of points with vectors to update
+  
+  <ParamField body="id" type="integer | string" required>
+    Point ID
+  </ParamField>
+  
+  <ParamField body="vector" type="object" required>
+    Named vectors to update
+  </ParamField>
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="operation_id" type="integer">
+    Operation identifier
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    Update status
+  </ResponseField>
+</ResponseField>
+
+## Delete Vectors
+
+Delete specific named vectors from points.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/vectors/delete' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": ["image", "audio"],
+    "points": [1, 2, 3]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for changes to actually happen
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees for the operation
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="vector" type="array" required>
+  Array of vector names to delete
+</ParamField>
+
+<ParamField body="points" type="array">
+  Array of point IDs
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter to select points
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="operation_id" type="integer">
+    Operation identifier
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    Update status
+  </ResponseField>
+</ResponseField>
+
+## Batch Update
+
+Apply multiple update operations for points, vectors, and payloads in a single request.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/batch' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "operations": [
+      {
+        "upsert": {
+          "points": [
+            {"id": 1, "vector": [0.1, 0.2], "payload": {"city": "Berlin"}}
+          ]
+        }
+      },
+      {
+        "delete": {
+          "points": [2, 3]
+        }
+      }
+    ]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for changes to actually happen
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees for the operation
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="operations" type="array" required>
+  Array of operations to execute. Each operation can be: `upsert`, `delete`, `set_payload`, `overwrite_payload`, `delete_payload`, `clear_payload`, `update_vectors`, or `delete_vectors`.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="array">
+  Array of update results for each operation
+</ResponseField>

@@ -1,0 +1,687 @@
+---
+title: Go Client
+description: Official Go client for Qdrant with native gRPC support, connection pooling, and idiomatic Go interfaces
+---
+
+## Installation
+
+Install via go get:
+
+```bash
+go get github.com/qdrant/go-client
+```
+
+## Quick Start
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/qdrant/go-client/qdrant"
+)
+
+func main() {
+	client, err := qdrant.NewClient(&qdrant.Config{
+		Host: "localhost",
+		Port: 6334,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+
+	// Create collection
+	err = client.CreateCollection(ctx, &qdrant.CreateCollection{
+		CollectionName: "my_collection",
+		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
+			Size:     384,
+			Distance: qdrant.Distance_Cosine,
+		}),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Upsert points
+	err = client.Upsert(ctx, &qdrant.UpsertPoints{
+		CollectionName: "my_collection",
+		Points: []*qdrant.PointStruct{
+			{
+				Id:      qdrant.NewIDNum(1),
+				Vectors: qdrant.NewVectors(0.05, 0.61, 0.76, 0.74),
+				Payload: qdrant.NewValueMap(map[string]any{
+					"city":    "Berlin",
+					"country": "Germany",
+				}),
+			},
+			{
+				Id:      qdrant.NewIDNum(2),
+				Vectors: qdrant.NewVectors(0.19, 0.81, 0.75, 0.11),
+				Payload: qdrant.NewValueMap(map[string]any{
+					"city":    "London",
+					"country": "UK",
+				}),
+			},
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Search
+	searchResult, err := client.Search(ctx, &qdrant.SearchPoints{
+		CollectionName: "my_collection",
+		Vector:         []float32{0.2, 0.1, 0.9, 0.7},
+		Limit:          3,
+		WithPayload:    qdrant.NewWithPayload(true),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, point := range searchResult {
+		fmt.Printf("ID: %v, Score: %f\n", point.Id, point.Score)
+		fmt.Printf("Payload: %v\n", point.Payload)
+	}
+}
+```
+
+## Repository
+
+<Card title="GitHub Repository" icon="github" href="https://github.com/qdrant/go-client">
+  Official Go client: `qdrant/go-client`
+</Card>
+
+## Client Initialization
+
+### Basic Connection
+
+```go
+import "github.com/qdrant/go-client/qdrant"
+
+// Connect to local instance
+client, err := qdrant.NewClient(&qdrant.Config{
+	Host: "localhost",
+	Port: 6334, // gRPC port
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer client.Close()
+```
+
+### With API Key
+
+```go
+client, err := qdrant.NewClient(&qdrant.Config{
+	Host:   "your-cluster.cloud.qdrant.io",
+	Port:   6334,
+	APIKey: "your-api-key",
+	UseTLS: true,
+})
+```
+
+### With Custom Options
+
+```go
+import (
+	"time"
+	"google.golang.org/grpc"
+	"github.com/qdrant/go-client/qdrant"
+)
+
+client, err := qdrant.NewClient(&qdrant.Config{
+	Host:    "localhost",
+	Port:    6334,
+	Timeout: 30 * time.Second,
+	GrpcOptions: []grpc.DialOption{
+		grpc.WithMaxMsgSize(100 * 1024 * 1024), // 100MB
+	},
+})
+```
+
+## Collection Management
+
+### Create Collection
+
+```go
+err := client.CreateCollection(ctx, &qdrant.CreateCollection{
+	CollectionName: "my_collection",
+	VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
+		Size:     768,
+		Distance: qdrant.Distance_Cosine,
+		OnDisk:   qdrant.PtrOf(false),
+	}),
+	HnswConfig: &qdrant.HnswConfigDiff{
+		M:              qdrant.PtrOf(uint64(16)),
+		EfConstruct:    qdrant.PtrOf(uint64(100)),
+		FullScanThreshold: qdrant.PtrOf(uint64(10000)),
+	},
+	ReplicationFactor:       qdrant.PtrOf(uint32(2)),
+	WriteConsistencyFactor: qdrant.PtrOf(uint32(1)),
+})
+```
+
+### Create with Multiple Vectors
+
+```go
+err := client.CreateCollection(ctx, &qdrant.CreateCollection{
+	CollectionName: "multi_vector",
+	VectorsConfig: qdrant.NewVectorsConfigMap(map[string]*qdrant.VectorParams{
+		"text": {
+			Size:     768,
+			Distance: qdrant.Distance_Cosine,
+		},
+		"image": {
+			Size:     512,
+			Distance: qdrant.Distance_Euclid,
+		},
+	}),
+})
+```
+
+### Get Collection Info
+
+```go
+info, err := client.GetCollectionInfo(ctx, "my_collection")
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Status: %v\n", info.Status)
+fmt.Printf("Vectors count: %v\n", info.VectorsCount)
+fmt.Printf("Points count: %v\n", info.PointsCount)
+```
+
+### List Collections
+
+```go
+collections, err := client.ListCollections(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+
+for _, collection := range collections.GetCollections() {
+	fmt.Println(collection.Name)
+}
+```
+
+### Delete Collection
+
+```go
+err := client.DeleteCollection(ctx, "my_collection")
+```
+
+## Point Operations
+
+### Upsert Points
+
+```go
+err := client.Upsert(ctx, &qdrant.UpsertPoints{
+	CollectionName: "my_collection",
+	Wait:           qdrant.PtrOf(true),
+	Points: []*qdrant.PointStruct{
+		{
+			Id:      qdrant.NewIDNum(1),
+			Vectors: qdrant.NewVectors(0.05, 0.61, 0.76, 0.74),
+			Payload: qdrant.NewValueMap(map[string]any{
+				"title":    "Document 1",
+				"category": "technology",
+				"views":    1500,
+				"tags":     []string{"ai", "ml", "vector-db"},
+			}),
+		},
+	},
+})
+```
+
+### Upsert with UUID
+
+```go
+import "github.com/google/uuid"
+
+id := uuid.New()
+err := client.Upsert(ctx, &qdrant.UpsertPoints{
+	CollectionName: "my_collection",
+	Points: []*qdrant.PointStruct{
+		{
+			Id:      qdrant.NewID(id.String()),
+			Vectors: qdrant.NewVectors(0.1, 0.2, 0.3),
+			Payload: qdrant.NewValueMap(map[string]any{"key": "value"}),
+		},
+	},
+})
+```
+
+### Batch Upsert
+
+```go
+batchSize := 100
+totalPoints := 10000
+
+for i := 0; i < totalPoints; i += batchSize {
+	points := make([]*qdrant.PointStruct, 0, batchSize)
+	
+	for j := i; j < i+batchSize && j < totalPoints; j++ {
+		points = append(points, &qdrant.PointStruct{
+			Id:      qdrant.NewIDNum(uint64(j)),
+			Vectors: qdrant.NewVectors(0.1, 0.2, 0.3, 0.4), // Random in production
+			Payload: qdrant.NewValueMap(map[string]any{"index": j}),
+		})
+	}
+	
+	err := client.Upsert(ctx, &qdrant.UpsertPoints{
+		CollectionName: "my_collection",
+		Wait:           qdrant.PtrOf(false),
+		Points:         points,
+	})
+	if err != nil {
+		log.Printf("Batch %d failed: %v", i/batchSize, err)
+	}
+}
+```
+
+### Get Points
+
+```go
+points, err := client.Get(ctx, &qdrant.GetPoints{
+	CollectionName: "my_collection",
+	Ids: []*qdrant.PointId{
+		qdrant.NewIDNum(1),
+		qdrant.NewIDNum(2),
+		qdrant.NewIDNum(3),
+	},
+	WithPayload: qdrant.NewWithPayload(true),
+	WithVectors: qdrant.NewWithVectors(true),
+})
+
+for _, point := range points {
+	fmt.Printf("ID: %v\n", point.Id)
+	fmt.Printf("Vectors: %v\n", point.Vectors)
+	fmt.Printf("Payload: %v\n", point.Payload)
+}
+```
+
+### Delete Points
+
+```go
+// Delete by IDs
+err := client.Delete(ctx, &qdrant.DeletePoints{
+	CollectionName: "my_collection",
+	Points: &qdrant.PointsSelector{
+		PointsSelectorOneOf: &qdrant.PointsSelector_Points{
+			Points: &qdrant.PointsIdsList{
+				Ids: []*qdrant.PointId{
+					qdrant.NewIDNum(1),
+					qdrant.NewIDNum(2),
+				},
+			},
+		},
+	},
+})
+
+// Delete by filter
+err = client.Delete(ctx, &qdrant.DeletePoints{
+	CollectionName: "my_collection",
+	Points: &qdrant.PointsSelector{
+		PointsSelectorOneOf: &qdrant.PointsSelector_Filter{
+			Filter: &qdrant.Filter{
+				Must: []*qdrant.Condition{
+					qdrant.NewMatch("category", "outdated"),
+				},
+			},
+		},
+	},
+})
+```
+
+## Search Operations
+
+### Basic Search
+
+```go
+searchResult, err := client.Search(ctx, &qdrant.SearchPoints{
+	CollectionName: "my_collection",
+	Vector:         []float32{0.2, 0.1, 0.9, 0.7},
+	Limit:          10,
+	WithPayload:    qdrant.NewWithPayload(true),
+	WithVectors:    qdrant.NewWithVectors(false),
+})
+
+for _, point := range searchResult {
+	fmt.Printf("ID: %v, Score: %f\n", point.Id, point.Score)
+	fmt.Printf("Payload: %v\n", point.Payload)
+}
+```
+
+### Search with Filtering
+
+```go
+searchResult, err := client.Search(ctx, &qdrant.SearchPoints{
+	CollectionName: "my_collection",
+	Vector:         []float32{0.2, 0.1, 0.9, 0.7},
+	Filter: &qdrant.Filter{
+		Must: []*qdrant.Condition{
+			qdrant.NewMatch("category", "technology"),
+			qdrant.NewRange("views", &qdrant.Range{
+				Gte: qdrant.PtrOf(1000.0),
+				Lt:  qdrant.PtrOf(10000.0),
+			}),
+		},
+	},
+	Limit:          5,
+	ScoreThreshold: qdrant.PtrOf(float32(0.7)),
+})
+```
+
+### Search with Parameters
+
+```go
+searchResult, err := client.Search(ctx, &qdrant.SearchPoints{
+	CollectionName: "my_collection",
+	Vector:         []float32{0.2, 0.1, 0.9, 0.7},
+	Limit:          20,
+	Params: &qdrant.SearchParams{
+		HnswEf: qdrant.PtrOf(uint64(128)),
+		Exact:  qdrant.PtrOf(false),
+		Quantization: &qdrant.QuantizationSearchParams{
+			Ignore:       qdrant.PtrOf(false),
+			Rescore:      qdrant.PtrOf(true),
+			Oversampling: qdrant.PtrOf(2.0),
+		},
+	},
+})
+```
+
+### Batch Search
+
+```go
+searchResult, err := client.SearchBatch(ctx, &qdrant.SearchBatchPoints{
+	CollectionName: "my_collection",
+	SearchPoints: []*qdrant.SearchPoints{
+		{
+			Vector: []float32{0.2, 0.1, 0.9},
+			Limit:  5,
+		},
+		{
+			Vector: []float32{0.5, 0.3, 0.2},
+			Limit:  10,
+		},
+	},
+})
+
+for i, batch := range searchResult {
+	fmt.Printf("Results for query %d:\n", i)
+	for _, point := range batch.Result {
+		fmt.Printf("  ID: %v, Score: %f\n", point.Id, point.Score)
+	}
+}
+```
+
+## Recommendations
+
+```go
+recommendResult, err := client.Recommend(ctx, &qdrant.RecommendPoints{
+	CollectionName: "my_collection",
+	Positive: []*qdrant.PointId{
+		qdrant.NewIDNum(1),
+		qdrant.NewIDNum(2),
+		qdrant.NewIDNum(3),
+	},
+	Negative: []*qdrant.PointId{
+		qdrant.NewIDNum(10),
+	},
+	Limit:       10,
+	WithPayload: qdrant.NewWithPayload(true),
+})
+
+for _, point := range recommendResult {
+	fmt.Printf("ID: %v, Score: %f\n", point.Id, point.Score)
+}
+```
+
+## Query API (Universal)
+
+```go
+queryResult, err := client.Query(ctx, &qdrant.QueryPoints{
+	CollectionName: "my_collection",
+	Query: qdrant.NewQuery([]float32{0.1, 0.2, 0.3, 0.4}),
+	Limit:       qdrant.PtrOf(uint64(10)),
+	WithPayload: qdrant.NewWithPayload(true),
+})
+```
+
+## Payload Operations
+
+### Set Payload
+
+```go
+err := client.SetPayload(ctx, &qdrant.SetPayloadPoints{
+	CollectionName: "my_collection",
+	Payload: qdrant.NewValueMap(map[string]any{
+		"new_field":  "value",
+		"updated_at": "2024-01-01",
+	}),
+	PointsSelector: &qdrant.PointsSelector{
+		PointsSelectorOneOf: &qdrant.PointsSelector_Points{
+			Points: &qdrant.PointsIdsList{
+				Ids: []*qdrant.PointId{
+					qdrant.NewIDNum(1),
+					qdrant.NewIDNum(2),
+				},
+			},
+		},
+	},
+})
+```
+
+### Delete Payload Keys
+
+```go
+err := client.DeletePayload(ctx, &qdrant.DeletePayloadPoints{
+	CollectionName: "my_collection",
+	Keys:           []string{"old_field", "deprecated"},
+	PointsSelector: &qdrant.PointsSelector{
+		PointsSelectorOneOf: &qdrant.PointsSelector_Points{
+			Points: &qdrant.PointsIdsList{
+				Ids: []*qdrant.PointId{qdrant.NewIDNum(1)},
+			},
+		},
+	},
+})
+```
+
+## Scroll (Pagination)
+
+```go
+var offset *qdrant.PointId
+var allPoints []*qdrant.RetrievedPoint
+
+for {
+	result, err := client.Scroll(ctx, &qdrant.ScrollPoints{
+		CollectionName: "my_collection",
+		Limit:          qdrant.PtrOf(uint32(100)),
+		Offset:         offset,
+		WithPayload:    qdrant.NewWithPayload(true),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	allPoints = append(allPoints, result.Result...)
+	offset = result.NextPageOffset
+
+	if offset == nil {
+		break
+	}
+}
+
+fmt.Printf("Total points: %d\n", len(allPoints))
+```
+
+## Payload Indexing
+
+```go
+// Create keyword index
+err := client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+	CollectionName: "my_collection",
+	FieldName:      "category",
+	FieldType:      qdrant.FieldType_FieldTypeKeyword.Enum(),
+})
+
+// Create text index
+err = client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+	CollectionName: "my_collection",
+	FieldName:      "description",
+	FieldType:      qdrant.FieldType_FieldTypeText.Enum(),
+	FieldIndexParams: &qdrant.PayloadIndexParams{
+		IndexParams: &qdrant.PayloadIndexParams_TextIndexParams{
+			TextIndexParams: &qdrant.TextIndexParams{
+				Tokenizer:   qdrant.TokenizerType_Word,
+				Lowercase:   qdrant.PtrOf(true),
+				MinTokenLen: qdrant.PtrOf(uint64(2)),
+				MaxTokenLen: qdrant.PtrOf(uint64(20)),
+			},
+		},
+	},
+})
+
+// Delete index
+err = client.DeleteFieldIndex(ctx, "my_collection", "category")
+```
+
+## Count Points
+
+```go
+count, err := client.Count(ctx, &qdrant.CountPoints{
+	CollectionName: "my_collection",
+	Exact:          qdrant.PtrOf(true),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Total points: %d\n", count.GetResult().GetCount())
+```
+
+## Error Handling
+
+```go
+import (
+	"errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+info, err := client.GetCollectionInfo(ctx, "nonexistent")
+if err != nil {
+	if st, ok := status.FromError(err); ok {
+		switch st.Code() {
+		case codes.NotFound:
+			fmt.Println("Collection not found")
+		case codes.InvalidArgument:
+			fmt.Println("Invalid argument")
+		default:
+			fmt.Printf("Error: %v\n", st.Message())
+		}
+	} else {
+		log.Fatal(err)
+	}
+}
+```
+
+## Concurrency
+
+```go
+import "sync"
+
+func uploadConcurrent(client *qdrant.Client, points [][]*qdrant.PointStruct) error {
+	var wg sync.WaitGroup
+	errorChan := make(chan error, len(points))
+
+	for _, batch := range points {
+		wg.Add(1)
+		go func(batch []*qdrant.PointStruct) {
+			defer wg.Done()
+			err := client.Upsert(context.Background(), &qdrant.UpsertPoints{
+				CollectionName: "my_collection",
+				Points:         batch,
+			})
+			if err != nil {
+				errorChan <- err
+			}
+		}(batch)
+	}
+
+	wg.Wait()
+	close(errorChan)
+
+	for err := range errorChan {
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+```
+
+## Context with Timeout
+
+```go
+import (
+	"context"
+	"time"
+)
+
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+searchResult, err := client.Search(ctx, &qdrant.SearchPoints{
+	CollectionName: "my_collection",
+	Vector:         []float32{0.2, 0.1, 0.9, 0.7},
+	Limit:          10,
+})
+if err != nil {
+	if ctx.Err() == context.DeadlineExceeded {
+		fmt.Println("Search timed out")
+	}
+	log.Fatal(err)
+}
+```
+
+## Best Practices
+
+<Tip>
+  **Performance tips:**
+  - Reuse client instances across requests
+  - Use batch operations for bulk inserts
+  - Enable connection pooling with gRPC options
+  - Use goroutines for concurrent operations
+  - Always defer client.Close()
+</Tip>
+
+<Warning>
+  **Common pitfalls:**
+  - Always check error returns
+  - Use context.Context for cancellation and timeouts
+  - Handle gRPC status codes appropriately
+  - Don't forget to use qdrant.PtrOf() for optional fields
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title=".NET Client" icon="microsoft" href="/api/clients/dotnet">
+    .NET client documentation
+  </Card>
+  <Card title="gRPC API" icon="bolt" href="/api/grpc/overview">
+    Learn about gRPC protocol
+  </Card>
+</CardGroup>

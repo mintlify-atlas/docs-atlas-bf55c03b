@@ -1,0 +1,684 @@
+---
+title: Points Service
+description: gRPC API for inserting, searching, and managing vector points with filtering, recommendations, and batch operations
+---
+
+## Overview
+
+The Points service provides gRPC methods for all vector operations including CRUD, search, recommendations, and advanced queries.
+
+## Service Definition
+
+From `points_service.proto:8-103`:
+
+```protobuf
+service Points {
+  rpc Upsert(UpsertPoints) returns (PointsOperationResponse);
+  rpc Delete(DeletePoints) returns (PointsOperationResponse);
+  rpc Get(GetPoints) returns (GetResponse);
+  rpc UpdateVectors(UpdatePointVectors) returns (PointsOperationResponse);
+  rpc DeleteVectors(DeletePointVectors) returns (PointsOperationResponse);
+  rpc SetPayload(SetPayloadPoints) returns (PointsOperationResponse);
+  rpc OverwritePayload(SetPayloadPoints) returns (PointsOperationResponse);
+  rpc DeletePayload(DeletePayloadPoints) returns (PointsOperationResponse);
+  rpc ClearPayload(ClearPayloadPoints) returns (PointsOperationResponse);
+  rpc CreateFieldIndex(CreateFieldIndexCollection) returns (PointsOperationResponse);
+  rpc DeleteFieldIndex(DeleteFieldIndexCollection) returns (PointsOperationResponse);
+  rpc Search(SearchPoints) returns (SearchResponse);
+  rpc SearchBatch(SearchBatchPoints) returns (SearchBatchResponse);
+  rpc SearchGroups(SearchPointGroups) returns (SearchGroupsResponse);
+  rpc Scroll(ScrollPoints) returns (ScrollResponse);
+  rpc Recommend(RecommendPoints) returns (RecommendResponse);
+  rpc RecommendBatch(RecommendBatchPoints) returns (RecommendBatchResponse);
+  rpc RecommendGroups(RecommendPointGroups) returns (RecommendGroupsResponse);
+  rpc Discover(DiscoverPoints) returns (DiscoverResponse);
+  rpc DiscoverBatch(DiscoverBatchPoints) returns (DiscoverBatchResponse);
+  rpc Count(CountPoints) returns (CountResponse);
+  rpc UpdateBatch(UpdateBatchPoints) returns (UpdateBatchResponse);
+  rpc Query(QueryPoints) returns (QueryResponse);
+  rpc QueryBatch(QueryBatchPoints) returns (QueryBatchResponse);
+  rpc QueryGroups(QueryPointGroups) returns (QueryGroupsResponse);
+  rpc Facet(FacetCounts) returns (FacetResponse);
+}
+```
+
+## Upsert Points
+
+Insert or update points with vectors and payload:
+
+### Python Example
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", grpc_port=6334, prefer_grpc=True)
+
+client.upsert(
+    collection_name="my_collection",
+    points=[
+        models.PointStruct(
+            id=1,
+            vector=[0.1, 0.2, 0.3, 0.4],
+            payload={
+                "title": "Document 1",
+                "category": "technology",
+                "views": 1500
+            }
+        ),
+        models.PointStruct(
+            id=2,
+            vector=[0.2, 0.3, 0.4, 0.5],
+            payload={
+                "title": "Document 2",
+                "category": "science",
+                "views": 2300
+            }
+        )
+    ],
+    wait=True  # Wait for operation to complete
+)
+```
+
+### Batch Upsert (High Performance)
+
+```python
+import numpy as np
+from qdrant_client import models
+
+# Generate 10000 random vectors
+vectors = np.random.rand(10000, 384).tolist()
+
+# Batch upsert with optimized settings
+client.upload_points(
+    collection_name="my_collection",
+    points=[
+        models.PointStruct(
+            id=idx,
+            vector=vector,
+            payload={"index": idx}
+        )
+        for idx, vector in enumerate(vectors)
+    ],
+    batch_size=100,  # Upload in batches of 100
+    parallel=4,  # Use 4 parallel workers
+    wait=False  # Async mode for better throughput
+)
+```
+
+### Named Vectors
+
+```python
+from qdrant_client import models
+
+client.upsert(
+    collection_name="multi_vector",
+    points=[
+        models.PointStruct(
+            id=1,
+            vector={
+                "text": [0.1, 0.2, 0.3],
+                "image": [0.4, 0.5, 0.6]
+            },
+            payload={"type": "multimodal"}
+        )
+    ]
+)
+```
+
+## Search
+
+Find nearest neighbors using vector similarity:
+
+### Basic Search
+
+```python
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.1, 0.2, 0.3, 0.4],
+    limit=10,
+    with_payload=True,
+    with_vectors=False
+)
+
+for result in results:
+    print(f"ID: {result.id}, Score: {result.score}")
+    print(f"Payload: {result.payload}")
+```
+
+### Search with Filters
+
+```python
+from qdrant_client import models
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.1, 0.2, 0.3, 0.4],
+    query_filter=models.Filter(
+        must=[
+            models.FieldCondition(
+                key="category",
+                match=models.MatchValue(value="technology")
+            ),
+            models.FieldCondition(
+                key="views",
+                range=models.Range(gte=1000)
+            )
+        ]
+    ),
+    limit=5,
+    score_threshold=0.7  # Only return results with score > 0.7
+)
+```
+
+### Search Parameters
+
+```python
+from qdrant_client import models
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.1, 0.2, 0.3, 0.4],
+    limit=20,
+    search_params=models.SearchParams(
+        hnsw_ef=128,  # Higher ef = better recall, slower search
+        exact=False,  # Use approximate search (HNSW)
+        quantization=models.QuantizationSearchParams(
+            ignore=False,
+            rescore=True,  # Rescore top-k with original vectors
+            oversampling=2.0  # Fetch 2x more candidates before rescoring
+        )
+    )
+)
+```
+
+### Batch Search
+
+```python
+from qdrant_client import models
+
+search_queries = [
+    models.SearchRequest(
+        vector=[0.1, 0.2, 0.3],
+        limit=5,
+        filter=models.Filter(
+            must=[models.FieldCondition(key="category", match=models.MatchValue(value="tech"))]
+        )
+    ),
+    models.SearchRequest(
+        vector=[0.4, 0.5, 0.6],
+        limit=10
+    )
+]
+
+results = client.search_batch(
+    collection_name="my_collection",
+    requests=search_queries
+)
+```
+
+## Recommend
+
+Find similar points based on positive and negative examples:
+
+```python
+from qdrant_client import models
+
+# Recommend points similar to point 1, but not like point 10
+results = client.recommend(
+    collection_name="my_collection",
+    positive=[1, 5, 7],  # Points to use as positive examples
+    negative=[10, 15],   # Points to avoid
+    limit=10,
+    strategy=models.RecommendStrategy.BEST_SCORE
+)
+```
+
+### Recommend with Vectors
+
+```python
+results = client.recommend(
+    collection_name="my_collection",
+    positive=[
+        models.RecommendExample(id=1),
+        models.RecommendExample(vector=[0.1, 0.2, 0.3])
+    ],
+    negative=[
+        models.RecommendExample(vector=[0.9, 0.8, 0.7])
+    ],
+    limit=10
+)
+```
+
+## Query API (Universal)
+
+The Query API unifies search, recommend, discover, and more:
+
+### Nearest Search
+
+```python
+from qdrant_client import models
+
+results = client.query_points(
+    collection_name="my_collection",
+    query=[0.1, 0.2, 0.3, 0.4],
+    limit=10
+)
+```
+
+### Recommendation Query
+
+```python
+results = client.query_points(
+    collection_name="my_collection",
+    query=models.RecommendQuery(
+        recommend=models.RecommendInput(
+            positive=[1, 2, 3],
+            negative=[10]
+        )
+    ),
+    limit=10
+)
+```
+
+### Hybrid Search (Fusion)
+
+```python
+from qdrant_client import models
+
+results = client.query_points(
+    collection_name="my_collection",
+    prefetch=[
+        models.Prefetch(
+            query=[0.1, 0.2, 0.3],  # Dense vector search
+            using="dense",
+            limit=100
+        ),
+        models.Prefetch(
+            query=models.SparseVector(
+                indices=[1, 5, 10],
+                values=[0.5, 0.3, 0.2]
+            ),  # Sparse vector (BM25-like)
+            using="sparse",
+            limit=100
+        )
+    ],
+    query=models.FusionQuery(fusion=models.Fusion.RRF),  # Reciprocal Rank Fusion
+    limit=10
+)
+```
+
+## Get Points
+
+Retrieve points by ID:
+
+```python
+points = client.retrieve(
+    collection_name="my_collection",
+    ids=[1, 2, 3, 10, 20],
+    with_payload=True,
+    with_vectors=True
+)
+
+for point in points:
+    print(f"ID: {point.id}")
+    print(f"Vector: {point.vector}")
+    print(f"Payload: {point.payload}")
+```
+
+## Scroll
+
+Iterate through all points:
+
+```python
+from qdrant_client import models
+
+# Scroll through all points
+offset = None
+all_points = []
+
+while True:
+    result = client.scroll(
+        collection_name="my_collection",
+        limit=100,
+        offset=offset,
+        with_payload=True,
+        with_vectors=False
+    )
+    
+    all_points.extend(result[0])
+    offset = result[1]  # Next page offset
+    
+    if offset is None:
+        break
+
+print(f"Total points: {len(all_points)}")
+```
+
+### Scroll with Filter
+
+```python
+from qdrant_client import models
+
+result = client.scroll(
+    collection_name="my_collection",
+    scroll_filter=models.Filter(
+        must=[
+            models.FieldCondition(
+                key="category",
+                match=models.MatchValue(value="science")
+            )
+        ]
+    ),
+    limit=50
+)
+```
+
+## Update Operations
+
+### Update Vectors
+
+```python
+from qdrant_client import models
+
+client.update_vectors(
+    collection_name="my_collection",
+    points=[
+        models.PointVectors(
+            id=1,
+            vector=[0.9, 0.8, 0.7, 0.6]
+        )
+    ]
+)
+```
+
+### Set Payload
+
+```python
+from qdrant_client import models
+
+client.set_payload(
+    collection_name="my_collection",
+    payload={
+        "updated": True,
+        "timestamp": "2024-01-01"
+    },
+    points=[1, 2, 3]  # Update these point IDs
+)
+```
+
+### Overwrite Payload
+
+```python
+from qdrant_client import models
+
+# Replace entire payload
+client.overwrite_payload(
+    collection_name="my_collection",
+    payload={"new_field": "value"},
+    points=[1, 2]
+)
+```
+
+### Delete Payload Keys
+
+```python
+client.delete_payload(
+    collection_name="my_collection",
+    keys=["old_field", "deprecated_field"],
+    points=[1, 2, 3]
+)
+```
+
+### Clear Payload
+
+```python
+from qdrant_client import models
+
+# Remove all payload from points
+client.clear_payload(
+    collection_name="my_collection",
+    points_selector=models.PointIdsList(points=[1, 2, 3])
+)
+```
+
+## Delete Points
+
+### Delete by IDs
+
+```python
+from qdrant_client import models
+
+client.delete(
+    collection_name="my_collection",
+    points_selector=models.PointIdsList(
+        points=[1, 2, 3, 100, 200]
+    )
+)
+```
+
+### Delete by Filter
+
+```python
+from qdrant_client import models
+
+client.delete(
+    collection_name="my_collection",
+    points_selector=models.FilterSelector(
+        filter=models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="category",
+                    match=models.MatchValue(value="outdated")
+                )
+            ]
+        )
+    )
+)
+```
+
+## Payload Indexing
+
+Create indexes for faster filtering:
+
+```python
+from qdrant_client import models
+
+# Create keyword index
+client.create_payload_index(
+    collection_name="my_collection",
+    field_name="category",
+    field_schema=models.PayloadSchemaType.KEYWORD
+)
+
+# Create integer index with range support
+client.create_payload_index(
+    collection_name="my_collection",
+    field_name="views",
+    field_schema=models.PayloadSchemaType.INTEGER
+)
+
+# Create geo index
+client.create_payload_index(
+    collection_name="my_collection",
+    field_name="location",
+    field_schema=models.PayloadSchemaType.GEO
+)
+
+# Create text index for full-text search
+client.create_payload_index(
+    collection_name="my_collection",
+    field_name="description",
+    field_schema=models.PayloadSchemaType.TEXT,
+    field_index_params=models.TextIndexParams(
+        type="text",
+        tokenizer=models.TokenizerType.WORD,
+        lowercase=True,
+        min_token_len=2,
+        max_token_len=20
+    )
+)
+```
+
+## Count Points
+
+```python
+from qdrant_client import models
+
+# Count all points
+count = client.count(
+    collection_name="my_collection",
+    exact=True
+)
+print(f"Total points: {count.count}")
+
+# Count with filter
+count = client.count(
+    collection_name="my_collection",
+    count_filter=models.Filter(
+        must=[
+            models.FieldCondition(
+                key="category",
+                match=models.MatchValue(value="technology")
+            )
+        ]
+    ),
+    exact=True
+)
+print(f"Technology points: {count.count}")
+```
+
+## Facet Counts
+
+Get value distribution for a field:
+
+```python
+from qdrant_client import models
+
+facets = client.facet(
+    collection_name="my_collection",
+    key="category",
+    limit=10
+)
+
+for facet in facets:
+    print(f"{facet.value}: {facet.count}")
+```
+
+## Consistency & Ordering
+
+### Write Consistency
+
+From `points.proto:11-20`:
+
+```protobuf
+enum WriteOrderingType {
+  Weak = 0;    // Reordered, fastest
+  Medium = 1;  // Dynamic leader, may be inconsistent briefly
+  Strong = 2;  // Permanent leader, consistent
+}
+```
+
+```python
+from qdrant_client import models
+
+client.upsert(
+    collection_name="my_collection",
+    points=[models.PointStruct(id=1, vector=[0.1, 0.2, 0.3])],
+    ordering=models.WriteOrdering.STRONG  # Strongest consistency
+)
+```
+
+### Read Consistency
+
+```python
+from qdrant_client import models
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.1, 0.2, 0.3],
+    limit=10,
+    consistency=models.ReadConsistency.QUORUM  # Read from majority
+)
+```
+
+## Shard Key Selection
+
+For custom-sharded collections:
+
+```python
+from qdrant_client import models
+
+# Upsert to specific shard
+client.upsert(
+    collection_name="tenant_sharded",
+    points=[models.PointStruct(id=1, vector=[0.1, 0.2, 0.3])],
+    shard_key_selector=["tenant_a"]
+)
+
+# Search in specific shard
+results = client.search(
+    collection_name="tenant_sharded",
+    query_vector=[0.1, 0.2, 0.3],
+    limit=10,
+    shard_key_selector=["tenant_a"]
+)
+```
+
+## Batch Operations
+
+Perform multiple operations in a single request:
+
+```python
+from qdrant_client import models
+
+results = client.batch_update_points(
+    collection_name="my_collection",
+    update_operations=[
+        models.UpsertOperation(
+            upsert=models.PointsList(
+                points=[
+                    models.PointStruct(id=1, vector=[0.1, 0.2, 0.3])
+                ]
+            )
+        ),
+        models.SetPayloadOperation(
+            set_payload=models.SetPayload(
+                payload={"status": "active"},
+                points=[2, 3, 4]
+            )
+        ),
+        models.DeleteOperation(
+            delete=models.PointIdsList(points=[100, 101])
+        )
+    ]
+)
+```
+
+## Performance Tips
+
+<Tip>
+  **Optimize throughput:**
+  - Use batch operations for bulk inserts (100-1000 points per batch)
+  - Set `wait=False` for async mode (10x faster)
+  - Use parallel uploads with `upload_points()` method
+  - Enable gRPC with `prefer_grpc=True` for 30-50% speedup
+</Tip>
+
+<Warning>
+  **Search performance:**
+  - Create payload indexes before filtering on fields
+  - Use `score_threshold` to reduce result processing
+  - Lower `hnsw_ef` for faster search (trade-off with recall)
+  - Consider quantization for large collections (>1M vectors)
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Collections" icon="folder" href="/api/grpc/collections">
+    Collection management API
+  </Card>
+  <Card title="Python Client" icon="python" href="/api/clients/python">
+    Full Python client reference
+  </Card>
+</CardGroup>

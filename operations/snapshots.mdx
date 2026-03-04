@@ -1,0 +1,478 @@
+---
+title: Snapshots
+description: Create, manage, and recover from collection and shard snapshots in Qdrant
+---
+
+Qdrant provides a comprehensive snapshot system for backing up and restoring data at multiple levels of granularity.
+
+## Collection Snapshots
+
+Collection snapshots capture the complete state of a collection including vectors, payloads, indexes, and configuration.
+
+### Creating Collection Snapshots
+
+<Tabs>
+  <Tab title="REST API">
+    ```bash
+    POST /collections/{collection_name}/snapshots
+    ```
+
+    Example:
+    ```bash
+    curl -X POST http://localhost:6333/collections/my_collection/snapshots
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    from qdrant_client import QdrantClient
+
+    client = QdrantClient("localhost", port=6333)
+    
+    snapshot_info = client.create_snapshot(
+        collection_name="my_collection"
+    )
+    
+    print(f"Snapshot created: {snapshot_info.name}")
+    ```
+  </Tab>
+  <Tab title="gRPC">
+    ```python
+    import grpc
+    from qdrant_client import QdrantClient
+
+    client = QdrantClient("localhost", port=6334, prefer_grpc=True)
+    snapshot_info = client.create_snapshot(collection_name="my_collection")
+    ```
+  </Tab>
+</Tabs>
+
+### Synchronous vs Asynchronous
+
+By default, snapshot creation is synchronous. For large collections, use async mode:
+
+```bash
+curl -X POST "http://localhost:6333/collections/my_collection/snapshots?wait=false"
+```
+
+### Listing Snapshots
+
+```bash
+GET /collections/{collection_name}/snapshots
+```
+
+Example:
+```bash
+curl http://localhost:6333/collections/my_collection/snapshots
+```
+
+Response:
+```json
+{
+  "result": [
+    {
+      "name": "my_collection-2024-03-04-12-00-00.snapshot",
+      "creation_time": "2024-03-04T12:00:00Z",
+      "size": 524288000
+    }
+  ],
+  "status": "ok",
+  "time": 0.001
+}
+```
+
+### Downloading Snapshots
+
+```bash
+GET /collections/{collection_name}/snapshots/{snapshot_name}
+```
+
+Example:
+```bash
+curl http://localhost:6333/collections/my_collection/snapshots/snapshot-2024.snapshot \
+  --output my_collection_backup.snapshot
+```
+
+### Deleting Snapshots
+
+```bash
+DELETE /collections/{collection_name}/snapshots/{snapshot_name}
+```
+
+Example:
+```bash
+curl -X DELETE \
+  http://localhost:6333/collections/my_collection/snapshots/snapshot-2024.snapshot
+```
+
+## Snapshot Recovery
+
+### Upload and Recover
+
+Upload a snapshot file and automatically recover the collection:
+
+```bash
+POST /collections/{collection_name}/snapshots/upload
+```
+
+Example:
+```bash
+curl -X POST \
+  -F "snapshot=@my_collection_backup.snapshot" \
+  http://localhost:6333/collections/my_collection/snapshots/upload
+```
+
+With checksum verification:
+```bash
+curl -X POST \
+  -F "snapshot=@backup.snapshot" \
+  "http://localhost:6333/collections/my_collection/snapshots/upload?checksum=b3a8..."
+```
+
+### Recover from URL
+
+Recover from a remote snapshot location:
+
+```bash
+PUT /collections/{collection_name}/snapshots/recover
+```
+
+Example with HTTP URL:
+```bash
+curl -X PUT http://localhost:6333/collections/my_collection/snapshots/recover \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "location": "http://example.com/backup.snapshot"
+  }'
+```
+
+Example with file path:
+```bash
+curl -X PUT http://localhost:6333/collections/my_collection/snapshots/recover \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "location": "file:///backup/snapshot.snapshot"
+  }'
+```
+
+### Recovery with Priority
+
+Control recovery behavior:
+
+```json
+{
+  "location": "http://example.com/backup.snapshot",
+  "priority": "snapshot"
+}
+```
+
+Priority options:
+- **`snapshot`** - Prioritize snapshot data, prefer using the snapshot for recovery
+- **`replica`** - Prioritize existing replicas, use snapshot only if replicas unavailable
+- **`no_sync`** - Skip post-recovery synchronization
+
+## Shard Snapshots
+
+For distributed deployments, you can create snapshots at the shard level.
+
+### Creating Shard Snapshots
+
+```bash
+POST /collections/{collection_name}/shards/{shard_id}/snapshots
+```
+
+Example:
+```bash
+curl -X POST \
+  http://localhost:6333/collections/my_collection/shards/0/snapshots
+```
+
+### Listing Shard Snapshots
+
+```bash
+GET /collections/{collection_name}/shards/{shard_id}/snapshots
+```
+
+### Downloading Shard Snapshots
+
+```bash
+GET /collections/{collection_name}/shards/{shard_id}/snapshots/{snapshot_name}
+```
+
+### Direct Shard Snapshot Streaming
+
+Stream a shard snapshot directly:
+
+```bash
+GET /collections/{collection_name}/shards/{shard_id}/snapshot
+```
+
+This creates and streams the snapshot in one operation.
+
+### Shard Snapshot Recovery
+
+Upload and recover a shard:
+
+```bash
+POST /collections/{collection_name}/shards/{shard_id}/snapshots/upload
+```
+
+Example:
+```bash
+curl -X POST \
+  -F "snapshot=@shard-backup.snapshot" \
+  "http://localhost:6333/collections/my_collection/shards/0/snapshots/upload"
+```
+
+Recover from URL:
+
+```bash
+PUT /collections/{collection_name}/shards/{shard_id}/snapshots/recover
+```
+
+```bash
+curl -X PUT \
+  http://localhost:6333/collections/my_collection/shards/0/snapshots/recover \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "location": "http://example.com/shard-backup.snapshot",
+    "priority": "snapshot"
+  }'
+```
+
+## Partial Snapshots
+
+Partial snapshots enable incremental backups and recoveries, transferring only changed data.
+
+### Creating Partial Snapshots
+
+```bash
+POST /collections/{collection_name}/shards/{shard_id}/snapshot/partial/create
+```
+
+With manifest:
+```bash
+curl -X POST \
+  http://localhost:6333/collections/my_collection/shards/0/snapshot/partial/create \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "files": [
+      {"path": "segment_1.dat", "hash": "abc123"},
+      {"path": "segment_2.dat", "hash": "def456"}
+    ]
+  }'
+```
+
+The server compares the manifest with its current state and returns only changed files.
+
+### Recovering from Partial Snapshots
+
+```bash
+POST /collections/{collection_name}/shards/{shard_id}/snapshot/partial/recover
+```
+
+Upload partial snapshot:
+```bash
+curl -X POST \
+  -F "snapshot=@partial-backup.snapshot" \
+  http://localhost:6333/collections/my_collection/shards/0/snapshot/partial/recover
+```
+
+### Recover from Peer
+
+Recover using partial snapshot from another peer:
+
+```bash
+POST /collections/{collection_name}/shards/{shard_id}/snapshot/partial/recover_from
+```
+
+Example:
+```bash
+curl -X POST \
+  http://localhost:6333/collections/my_collection/shards/0/snapshot/partial/recover_from \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "peer_url": "http://peer-node:6333",
+    "api_key": "your-api-key"
+  }'
+```
+
+This:
+1. Gets the partial snapshot manifest from the local shard
+2. Requests a partial snapshot from the peer with the manifest
+3. Receives only the differences
+4. Applies changes to the local shard
+
+### Partial Snapshot Manifest
+
+Get the current partial snapshot manifest:
+
+```bash
+GET /collections/{collection_name}/shards/{shard_id}/snapshot/partial/manifest
+```
+
+## S3 Integration
+
+Qdrant supports storing snapshots directly in S3.
+
+### Configuring S3 Storage
+
+```yaml config/config.yaml
+storage:
+  snapshots_config:
+    snapshots_storage: s3
+    s3_config:
+      bucket: "my-qdrant-snapshots"
+      region: "us-east-1"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+```
+
+<Warning>
+Store S3 credentials securely using environment variables or secret management systems.
+</Warning>
+
+### Recovering from S3
+
+```bash
+curl -X PUT http://localhost:6333/collections/my_collection/snapshots/recover \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "location": "s3://my-qdrant-snapshots/backup.snapshot",
+    "api_key": "AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  }'
+```
+
+## Storage Snapshots
+
+Full storage snapshots capture the entire Qdrant instance.
+
+### Creating Full Snapshots
+
+```bash
+POST /snapshots
+```
+
+Example:
+```bash
+curl -X POST http://localhost:6333/snapshots
+```
+
+### Listing Full Snapshots
+
+```bash
+GET /snapshots
+```
+
+### Downloading Full Snapshots
+
+```bash
+GET /snapshots/{snapshot_name}
+```
+
+### Deleting Full Snapshots
+
+```bash
+DELETE /snapshots/{snapshot_name}
+```
+
+## Snapshot Monitoring
+
+Monitor snapshot operations via metrics:
+
+- **`snapshot_creation_running`** - Number of active snapshot creations
+- **`snapshot_recovery_running`** - Number of active recoveries
+- **`snapshot_created_total`** - Total snapshots created
+
+```bash
+curl http://localhost:6333/metrics | grep snapshot
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Use Checksums" icon="shield">
+Always verify snapshot integrity with SHA-256 checksums during uploads and recovery.
+</Card>
+
+<Card title="Async for Large Collections" icon="clock">
+Use `wait=false` for collections with millions of vectors to avoid timeouts.
+</Card>
+
+<Card title="Partial for Incremental" icon="arrows-rotate">
+Use partial snapshots for frequent backups to reduce transfer size and time.
+</Card>
+
+<Card title="S3 for Durability" icon="cloud">
+Store production snapshots in S3 or similar object storage for durability and disaster recovery.
+</Card>
+
+</CardGroup>
+
+## Configuration
+
+### Snapshot Paths
+
+```yaml config/config.yaml
+storage:
+  snapshots_path: ./snapshots
+  temp_path: null  # Uses storage/snapshots_temp/ if null
+```
+
+### Storage Backend
+
+```yaml config/config.yaml
+storage:
+  snapshots_config:
+    snapshots_storage: local  # or "s3"
+```
+
+## Troubleshooting
+
+### Snapshot Creation Hangs
+
+- Use async mode: `?wait=false`
+- Check disk space in `snapshots_path`
+- Verify no ongoing optimization tasks blocking resources
+
+### Recovery Fails
+
+- Verify checksum matches
+- Check Qdrant version compatibility
+- Ensure sufficient disk space in `storage_path`
+- Review logs for detailed error messages
+
+### Checksum Mismatch
+
+```json
+{
+  "status": "error",
+  "error": "Checksum mismatch: expected b3a8..., got c4d9..."
+}
+```
+
+The snapshot file is corrupted or modified. Re-download or use a different snapshot.
+
+### Empty Partial Snapshot
+
+When recovering from a peer, if the response is `NOT_MODIFIED` (304), the replica is already up to date.
+
+## Advanced Usage
+
+### Custom Snapshot Names
+
+Snapshots are automatically named with timestamps:
+```
+{collection_name}-{timestamp}.snapshot
+```
+
+### Cross-Version Recovery
+
+Snapshots are forward-compatible within major versions. For major version upgrades, consult migration documentation.
+
+### Concurrent Operations
+
+Multiple snapshot operations can run concurrently:
+- Different collections can snapshot simultaneously
+- Snapshot creation doesn't block searches or updates
+- Recovery operations are serialized per collection

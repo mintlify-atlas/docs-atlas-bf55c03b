@@ -1,0 +1,463 @@
+---
+title: Distributed Deployment
+description: Deploy Qdrant in distributed mode with clustering, sharding, replication, and Raft consensus
+---
+
+Qdrant supports distributed deployment for horizontal scalability, high availability, and fault tolerance. A distributed cluster uses Raft consensus for coordination and supports automatic sharding and replication.
+
+## Overview
+
+A Qdrant cluster consists of multiple nodes that:
+
+- Share the load across multiple machines
+- Automatically replicate data for fault tolerance
+- Use Raft consensus algorithm for distributed coordination
+- Support dynamic scaling and rebalancing
+
+## Enabling Cluster Mode
+
+Set `cluster.enabled` to `true` in your configuration:
+
+```yaml config/config.yaml
+cluster:
+  enabled: true
+  
+  p2p:
+    port: 6335
+    enable_tls: false
+  
+  consensus:
+    tick_period_ms: 100
+```
+
+Or use environment variables:
+
+```bash
+QDRANT__CLUSTER__ENABLED=true
+QDRANT__CLUSTER__P2P__PORT=6335
+```
+
+## Bootstrapping a Cluster
+
+When starting a cluster, nodes must be bootstrapped using the `--uri` and `--bootstrap` flags.
+
+### First Node (Bootstrap Node)
+
+Start the first node with only the `--uri` flag:
+
+```bash
+./qdrant --uri 'http://qdrant-node-1:6335'
+```
+
+With Docker:
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -e QDRANT__CLUSTER__ENABLED=true \
+    -e QDRANT__CLUSTER__P2P__PORT=6335 \
+    qdrant/qdrant:latest \
+    ./qdrant --uri 'http://qdrant-node-1:6335'
+```
+
+### Additional Nodes
+
+Start additional nodes with both `--uri` and `--bootstrap` flags:
+
+```bash
+./qdrant \
+    --uri 'http://qdrant-node-2:6335' \
+    --bootstrap 'http://qdrant-node-1:6335'
+```
+
+With Docker:
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -e QDRANT__CLUSTER__ENABLED=true \
+    -e QDRANT__CLUSTER__P2P__PORT=6335 \
+    qdrant/qdrant:latest \
+    ./qdrant \
+        --uri 'http://qdrant-node-2:6335' \
+        --bootstrap 'http://qdrant-node-1:6335'
+```
+
+<Note>
+The `--uri` flag specifies this node's P2P address. The `--bootstrap` flag points to an existing cluster member.
+</Note>
+
+## Docker Compose Cluster
+
+Here's a complete 3-node cluster configuration:
+
+```yaml docker-compose.yml
+version: '3.7'
+
+services:
+  qdrant_node_1:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_node_1
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__P2P__PORT=6335
+    ports:
+      - "6333:6333"  # HTTP
+      - "6334:6334"  # gRPC
+    volumes:
+      - ./qdrant_data_1:/qdrant/storage
+    command: ./qdrant --uri 'http://qdrant_node_1:6335'
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:6333/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  qdrant_node_2:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_node_2
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__P2P__PORT=6335
+    depends_on:
+      - qdrant_node_1
+    ports:
+      - "6433:6333"  # HTTP
+      - "6434:6334"  # gRPC
+    volumes:
+      - ./qdrant_data_2:/qdrant/storage
+    command: ./qdrant --bootstrap 'http://qdrant_node_1:6335' --uri 'http://qdrant_node_2:6335'
+
+  qdrant_node_3:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_node_3
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__P2P__PORT=6335
+    depends_on:
+      - qdrant_node_1
+    ports:
+      - "6533:6333"  # HTTP
+      - "6534:6334"  # gRPC
+    volumes:
+      - ./qdrant_data_3:/qdrant/storage
+    command: ./qdrant --bootstrap 'http://qdrant_node_1:6335' --uri 'http://qdrant_node_3:6335'
+```
+
+Start the cluster:
+
+```bash
+docker-compose up -d
+```
+
+## Replication
+
+Configure replication at the collection level to ensure data availability:
+
+```bash
+curl -X PUT http://localhost:6333/collections/my_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 384,
+      "distance": "Cosine"
+    },
+    "replication_factor": 3,
+    "write_consistency_factor": 2
+  }'
+```
+
+### Replication Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `replication_factor` | Number of replicas for each shard | `1` |
+| `write_consistency_factor` | Number of replicas that must acknowledge a write | `1` |
+
+<Note>
+`write_consistency_factor` must be less than or equal to `replication_factor`. A higher value provides stronger consistency but may impact write latency.
+</Note>
+
+### Default Replication
+
+Set default replication for all new collections:
+
+```yaml config/config.yaml
+storage:
+  collection:
+    replication_factor: 3
+    write_consistency_factor: 2
+```
+
+## Sharding
+
+Qdrant automatically distributes data across cluster nodes using shards. Configure sharding when creating a collection:
+
+```bash
+curl -X PUT http://localhost:6333/collections/my_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 384,
+      "distance": "Cosine"
+    },
+    "shard_number": 6,
+    "replication_factor": 2
+  }'
+```
+
+### Shard Distribution
+
+- Shards are distributed evenly across available nodes
+- Each shard can have multiple replicas based on `replication_factor`
+- More shards enable better parallelization but add overhead
+
+### Shard Number Recommendations
+
+<Tip>
+A good starting point is `shard_number = nodes * 2` to allow for future scaling.
+</Tip>
+
+## Consensus (Raft)
+
+Qdrant uses the Raft consensus algorithm for:
+
+- Leader election
+- Cluster membership management
+- Collection metadata synchronization
+- Distributed coordination
+
+### Consensus Configuration
+
+```yaml config/config.yaml
+cluster:
+  consensus:
+    # How frequently peers ping each other (milliseconds)
+    tick_period_ms: 100
+    
+    # Compact consensus log after this many operations
+    # 0 = disable compaction
+    compact_wal_entries: 128
+```
+
+<Warning>
+Do not change `tick_period_ms` unless you understand the implications. Lower values increase network overhead; higher values slow down failure detection.
+</Warning>
+
+## Shard Transfer
+
+Qdrant supports multiple shard transfer methods during rebalancing:
+
+```yaml config/config.yaml
+storage:
+  # Options: stream_records, snapshot, wal_delta, null (auto)
+  shard_transfer_method: null
+```
+
+### Transfer Methods
+
+| Method | Description | Best For |
+|--------|-------------|----------|
+| `stream_records` | Stream records one by one | Small shards |
+| `snapshot` | Transfer entire snapshot | Large shards |
+| `wal_delta` | Transfer WAL changes | Recently created shards |
+| `null` | Automatic selection | General use |
+
+## Performance Tuning
+
+### Update Rate Limiting
+
+Prevent overwhelming the cluster with concurrent updates:
+
+```yaml config/config.yaml
+storage:
+  performance:
+    # Limit concurrent updates (null = auto)
+    update_rate_limit: null
+    
+    # Limit incoming automatic shard transfers
+    incoming_shard_transfers_limit: 1
+    
+    # Limit outgoing automatic shard transfers
+    outgoing_shard_transfers_limit: 1
+```
+
+### Message Queue Size
+
+For high-throughput clusters:
+
+```bash
+QDRANT__CLUSTER__CONSENSUS__MAX_MESSAGE_QUEUE_SIZE=5000
+```
+
+## TLS for Inter-Node Communication
+
+Enable TLS between cluster nodes:
+
+```yaml config/config.yaml
+cluster:
+  p2p:
+    enable_tls: true
+
+tls:
+  cert: ./tls/cert.pem
+  key: ./tls/key.pem
+  ca_cert: ./tls/cacert.pem
+```
+
+<Warning>
+All nodes in the cluster must have TLS enabled or disabled consistently. Mixed configurations are not supported.
+</Warning>
+
+## Kubernetes StatefulSet Cluster
+
+Deploy a distributed cluster on Kubernetes:
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+spec:
+  serviceName: qdrant-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+    spec:
+      containers:
+      - name: qdrant
+        image: qdrant/qdrant:latest
+        env:
+        - name: QDRANT__CLUSTER__ENABLED
+          value: "true"
+        - name: QDRANT__CLUSTER__P2P__PORT
+          value: "6335"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          if [ "${HOSTNAME}" = "qdrant-0" ]; then
+            ./qdrant --uri "http://${HOSTNAME}.qdrant-headless:6335"
+          else
+            ./qdrant --uri "http://${HOSTNAME}.qdrant-headless:6335" \
+                     --bootstrap "http://qdrant-0.qdrant-headless:6335"
+          fi
+        ports:
+        - containerPort: 6333
+          name: http
+        - containerPort: 6334
+          name: grpc
+        - containerPort: 6335
+          name: p2p
+        volumeMounts:
+        - name: qdrant-storage
+          mountPath: /qdrant/storage
+  volumeClaimTemplates:
+  - metadata:
+      name: qdrant-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 20Gi
+```
+
+## Monitoring Cluster Health
+
+Check cluster status via the API:
+
+```bash
+curl http://localhost:6333/cluster
+```
+
+Response includes:
+- Node status and peer information
+- Raft state and leader
+- Consensus term information
+
+## Node Types
+
+Qdrant supports different node types:
+
+### Normal Node
+
+```yaml
+storage:
+  node_type: "Normal"
+```
+
+Receives all updates and answers all queries.
+
+### Listener Node
+
+```yaml
+storage:
+  node_type: "Listener"
+```
+
+Receives all updates but does not answer search/read queries. Useful for dedicated backup nodes.
+
+## Scaling the Cluster
+
+### Adding Nodes
+
+1. Start a new node with `--bootstrap` pointing to an existing node
+2. Qdrant automatically rebalances shards to the new node
+3. Monitor the rebalancing progress via `/cluster` endpoint
+
+### Removing Nodes
+
+1. Remove the node from the cluster via API or stop the process
+2. Qdrant automatically moves shards to remaining nodes
+3. Ensure `replication_factor` is sufficient for data safety
+
+<Warning>
+Always maintain at least `replication_factor` nodes in your cluster to avoid data loss.
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Odd Number of Nodes">
+    Use an odd number of nodes (3, 5, 7) for better Raft consensus and leader election.
+  </Accordion>
+  
+  <Accordion title="Replication Factor">
+    Set `replication_factor` to at least 3 for production clusters to ensure high availability.
+  </Accordion>
+  
+  <Accordion title="Write Consistency">
+    Use `write_consistency_factor = (replication_factor / 2) + 1` for strong consistency.
+  </Accordion>
+  
+  <Accordion title="Network Latency">
+    Keep cluster nodes in the same region or availability zone to minimize consensus latency.
+  </Accordion>
+  
+  <Accordion title="Resource Allocation">
+    Ensure all nodes have similar resources (CPU, memory, disk) for balanced performance.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Fine-tune cluster performance
+  </Card>
+  <Card title="Security" icon="shield" href="/deployment/security">
+    Secure inter-node communication
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
+    Deploy on Kubernetes
+  </Card>
+  <Card title="Docker" icon="docker" href="/deployment/docker">
+    Docker deployment basics
+  </Card>
+</CardGroup>

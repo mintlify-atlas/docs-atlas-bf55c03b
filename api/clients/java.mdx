@@ -1,0 +1,810 @@
+---
+title: Java Client
+description: Official Java client for Qdrant with gRPC support, reactive programming, and comprehensive type safety
+---
+
+## Installation
+
+Add to your `pom.xml` (Maven):
+
+```xml
+<dependency>
+    <groupId>io.qdrant</groupId>
+    <artifactId>client</artifactId>
+    <version>1.11.0</version>
+</dependency>
+```
+
+Or to your `build.gradle` (Gradle):
+
+```gradle
+implementation 'io.qdrant:client:1.11.0'
+```
+
+## Quick Start
+
+```java
+import io.qdrant.client.QdrantClient;
+import io.qdrant.client.QdrantGrpcClient;
+import io.qdrant.client.grpc.Collections.*;
+import io.qdrant.client.grpc.Points.*;
+import static io.qdrant.client.PointIdFactory.id;
+import static io.qdrant.client.ValueFactory.value;
+import static io.qdrant.client.VectorsFactory.vectors;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
+
+public class QdrantExample {
+    public static void main(String[] args) 
+            throws InterruptedException, ExecutionException {
+        
+        // Connect to Qdrant
+        QdrantClient client = new QdrantClient(
+            QdrantGrpcClient.newBuilder("localhost", 6334, false).build()
+        );
+
+        // Create collection
+        client.createCollectionAsync(
+            "my_collection",
+            VectorParams.newBuilder()
+                .setSize(384)
+                .setDistance(Distance.Cosine)
+                .build()
+        ).get();
+
+        // Upsert points
+        client.upsertAsync(
+            "my_collection",
+            List.of(
+                PointStruct.newBuilder()
+                    .setId(id(1))
+                    .setVectors(vectors(0.05f, 0.61f, 0.76f, 0.74f))
+                    .putAllPayload(Map.of(
+                        "city", value("Berlin"),
+                        "country", value("Germany")
+                    ))
+                    .build(),
+                PointStruct.newBuilder()
+                    .setId(id(2))
+                    .setVectors(vectors(0.19f, 0.81f, 0.75f, 0.11f))
+                    .putAllPayload(Map.of(
+                        "city", value("London"),
+                        "country", value("UK")
+                    ))
+                    .build()
+            )
+        ).get();
+
+        // Search
+        List<ScoredPoint> searchResult = client.searchAsync(
+            SearchPoints.newBuilder()
+                .setCollectionName("my_collection")
+                .addAllVector(List.of(0.2f, 0.1f, 0.9f, 0.7f))
+                .setLimit(3)
+                .setWithPayload(WithPayloadSelector.newBuilder()
+                    .setEnable(true)
+                    .build())
+                .build()
+        ).get();
+
+        for (ScoredPoint point : searchResult) {
+            System.out.println("ID: " + point.getId() + ", Score: " + point.getScore());
+            System.out.println("Payload: " + point.getPayloadMap());
+        }
+
+        client.close();
+    }
+}
+```
+
+## Repository
+
+<Card title="GitHub Repository" icon="github" href="https://github.com/qdrant/java-client">
+  Official Java client: `qdrant/java-client`
+</Card>
+
+## Client Initialization
+
+### Basic Connection
+
+```java
+import io.qdrant.client.QdrantClient;
+import io.qdrant.client.QdrantGrpcClient;
+
+// Connect to local instance
+QdrantClient client = new QdrantClient(
+    QdrantGrpcClient.newBuilder("localhost", 6334, false).build()
+);
+
+// Connect to Qdrant Cloud
+QdrantClient cloudClient = new QdrantClient(
+    QdrantGrpcClient.newBuilder(
+        "your-cluster.cloud.qdrant.io",
+        6334,
+        true // Use TLS
+    )
+    .withApiKey("your-api-key")
+    .build()
+);
+```
+
+### With Custom Options
+
+```java
+import io.grpc.ManagedChannelBuilder;
+import io.qdrant.client.QdrantClient;
+import io.qdrant.client.QdrantGrpcClient;
+
+import java.util.concurrent.TimeUnit;
+
+QdrantGrpcClient grpcClient = QdrantGrpcClient.newBuilder(
+    "localhost",
+    6334,
+    false
+)
+.withTimeout(30, TimeUnit.SECONDS)
+.build();
+
+QdrantClient client = new QdrantClient(grpcClient);
+```
+
+## Collection Management
+
+### Create Collection
+
+```java
+import io.qdrant.client.grpc.Collections.*;
+
+client.createCollectionAsync(
+    CreateCollection.newBuilder()
+        .setCollectionName("my_collection")
+        .setVectorsConfig(VectorsConfig.newBuilder()
+            .setParams(VectorParams.newBuilder()
+                .setSize(768)
+                .setDistance(Distance.Cosine)
+                .setOnDisk(false)
+                .setHnswConfig(HnswConfigDiff.newBuilder()
+                    .setM(16)
+                    .setEfConstruct(100)
+                    .setFullScanThreshold(10000)
+                    .build())
+                .build())
+            .build())
+        .setReplicationFactor(2)
+        .setWriteConsistencyFactor(1)
+        .build()
+).get();
+```
+
+### Create with Multiple Vectors
+
+```java
+import java.util.Map;
+
+client.createCollectionAsync(
+    CreateCollection.newBuilder()
+        .setCollectionName("multi_vector")
+        .setVectorsConfig(VectorsConfig.newBuilder()
+            .setParamsMap(VectorParamsMap.newBuilder()
+                .putAllMap(Map.of(
+                    "text", VectorParams.newBuilder()
+                        .setSize(768)
+                        .setDistance(Distance.Cosine)
+                        .build(),
+                    "image", VectorParams.newBuilder()
+                        .setSize(512)
+                        .setDistance(Distance.Euclid)
+                        .build()
+                ))
+                .build())
+            .build())
+        .build()
+).get();
+```
+
+### Get Collection Info
+
+```java
+CollectionInfo info = client.getCollectionInfoAsync("my_collection").get();
+
+System.out.println("Status: " + info.getStatus());
+System.out.println("Vectors count: " + info.getVectorsCount());
+System.out.println("Points count: " + info.getPointsCount());
+```
+
+### List Collections
+
+```java
+import io.qdrant.client.grpc.Collections.CollectionDescription;
+
+List<CollectionDescription> collections = client.listCollectionsAsync().get();
+
+for (CollectionDescription collection : collections) {
+    System.out.println(collection.getName());
+}
+```
+
+### Delete Collection
+
+```java
+client.deleteCollectionAsync("my_collection").get();
+```
+
+## Point Operations
+
+### Upsert Points
+
+```java
+import io.qdrant.client.grpc.Points.*;
+import static io.qdrant.client.PointIdFactory.id;
+import static io.qdrant.client.ValueFactory.value;
+import static io.qdrant.client.VectorsFactory.vectors;
+
+import java.util.List;
+import java.util.Map;
+
+client.upsertAsync(
+    "my_collection",
+    List.of(
+        PointStruct.newBuilder()
+            .setId(id(1))
+            .setVectors(vectors(0.05f, 0.61f, 0.76f, 0.74f))
+            .putAllPayload(Map.of(
+                "title", value("Document 1"),
+                "category", value("technology"),
+                "views", value(1500),
+                "tags", value(List.of("ai", "ml", "vector-db"))
+            ))
+            .build(),
+        PointStruct.newBuilder()
+            .setId(id(2))
+            .setVectors(vectors(0.19f, 0.81f, 0.75f, 0.11f))
+            .putAllPayload(Map.of(
+                "title", value("Document 2")
+            ))
+            .build()
+    ),
+    true // wait
+).get();
+```
+
+### Upsert with UUID
+
+```java
+import java.util.UUID;
+import static io.qdrant.client.PointIdFactory.id;
+
+UUID uuid = UUID.randomUUID();
+
+client.upsertAsync(
+    "my_collection",
+    List.of(
+        PointStruct.newBuilder()
+            .setId(id(uuid))
+            .setVectors(vectors(0.1f, 0.2f, 0.3f))
+            .putAllPayload(Map.of("key", value("value")))
+            .build()
+    )
+).get();
+```
+
+### Batch Upsert
+
+```java
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+
+int batchSize = 100;
+int totalPoints = 10000;
+Random random = new Random();
+
+for (int i = 0; i < totalPoints; i += batchSize) {
+    List<PointStruct> points = new ArrayList<>();
+    
+    for (int j = i; j < i + batchSize && j < totalPoints; j++) {
+        float[] vector = new float[384];
+        for (int k = 0; k < 384; k++) {
+            vector[k] = random.nextFloat();
+        }
+        
+        points.add(
+            PointStruct.newBuilder()
+                .setId(id(j))
+                .setVectors(vectors(vector))
+                .putAllPayload(Map.of("index", value(j)))
+                .build()
+        );
+    }
+    
+    client.upsertAsync("my_collection", points, false).get();
+}
+```
+
+### Get Points
+
+```java
+import static io.qdrant.client.PointIdFactory.id;
+import static io.qdrant.client.WithPayloadSelectorFactory.enable;
+import static io.qdrant.client.WithVectorsSelectorFactory.enable;
+
+List<RetrievedPoint> points = client.retrieveAsync(
+    "my_collection",
+    List.of(id(1), id(2), id(3)),
+    enable(true), // with_payload
+    enable(true), // with_vectors
+    null
+).get();
+
+for (RetrievedPoint point : points) {
+    System.out.println("ID: " + point.getId());
+    System.out.println("Vectors: " + point.getVectors());
+    System.out.println("Payload: " + point.getPayloadMap());
+}
+```
+
+### Delete Points
+
+```java
+import io.qdrant.client.grpc.Points.*;
+import static io.qdrant.client.PointIdFactory.id;
+import static io.qdrant.client.ConditionFactory.matchKeyword;
+
+// Delete by IDs
+client.deleteAsync(
+    "my_collection",
+    List.of(id(1), id(2), id(3)),
+    true, // wait
+    null,
+    null
+).get();
+
+// Delete by filter
+client.deleteAsync(
+    "my_collection",
+    Filter.newBuilder()
+        .addMust(matchKeyword("category", "outdated"))
+        .build(),
+    true,
+    null
+).get();
+```
+
+## Search Operations
+
+### Basic Search
+
+```java
+import io.qdrant.client.grpc.Points.*;
+import static io.qdrant.client.WithPayloadSelectorFactory.enable;
+
+import java.util.List;
+
+List<ScoredPoint> results = client.searchAsync(
+    SearchPoints.newBuilder()
+        .setCollectionName("my_collection")
+        .addAllVector(List.of(0.2f, 0.1f, 0.9f, 0.7f))
+        .setLimit(10)
+        .setWithPayload(enable(true))
+        .build()
+).get();
+
+for (ScoredPoint result : results) {
+    System.out.println("ID: " + result.getId() + ", Score: " + result.getScore());
+    System.out.println("Payload: " + result.getPayloadMap());
+}
+```
+
+### Search with Filtering
+
+```java
+import static io.qdrant.client.ConditionFactory.*;
+
+List<ScoredPoint> results = client.searchAsync(
+    SearchPoints.newBuilder()
+        .setCollectionName("my_collection")
+        .addAllVector(List.of(0.2f, 0.1f, 0.9f, 0.7f))
+        .setFilter(Filter.newBuilder()
+            .addMust(matchKeyword("category", "technology"))
+            .addMust(range("views", 
+                Range.newBuilder()
+                    .setGte(1000.0)
+                    .setLt(10000.0)
+                    .build()))
+            .build())
+        .setLimit(5)
+        .setScoreThreshold(0.7f)
+        .build()
+).get();
+```
+
+### Search with Parameters
+
+```java
+List<ScoredPoint> results = client.searchAsync(
+    SearchPoints.newBuilder()
+        .setCollectionName("my_collection")
+        .addAllVector(List.of(0.2f, 0.1f, 0.9f, 0.7f))
+        .setLimit(20)
+        .setParams(SearchParams.newBuilder()
+            .setHnswEf(128)
+            .setExact(false)
+            .setQuantization(QuantizationSearchParams.newBuilder()
+                .setIgnore(false)
+                .setRescore(true)
+                .setOversampling(2.0)
+                .build())
+            .build())
+        .build()
+).get();
+```
+
+### Batch Search
+
+```java
+import io.qdrant.client.grpc.Points.*;
+
+List<List<ScoredPoint>> batchResults = client.searchBatchAsync(
+    "my_collection",
+    List.of(
+        SearchPoints.newBuilder()
+            .addAllVector(List.of(0.2f, 0.1f, 0.9f))
+            .setLimit(5)
+            .build(),
+        SearchPoints.newBuilder()
+            .addAllVector(List.of(0.5f, 0.3f, 0.2f))
+            .setLimit(10)
+            .build()
+    ),
+    null
+).get();
+
+for (int i = 0; i < batchResults.size(); i++) {
+    System.out.println("Results for query " + i + ":");
+    for (ScoredPoint point : batchResults.get(i)) {
+        System.out.println("  ID: " + point.getId() + ", Score: " + point.getScore());
+    }
+}
+```
+
+## Recommendations
+
+```java
+import static io.qdrant.client.PointIdFactory.id;
+
+List<ScoredPoint> results = client.recommendAsync(
+    RecommendPoints.newBuilder()
+        .setCollectionName("my_collection")
+        .addAllPositive(List.of(id(1), id(2), id(3)))
+        .addAllNegative(List.of(id(10)))
+        .setLimit(10)
+        .setWithPayload(enable(true))
+        .build()
+).get();
+
+for (ScoredPoint result : results) {
+    System.out.println("ID: " + result.getId() + ", Score: " + result.getScore());
+}
+```
+
+## Query API (Universal)
+
+```java
+import io.qdrant.client.grpc.Points.*;
+import static io.qdrant.client.QueryFactory.nearest;
+
+List<ScoredPoint> results = client.queryAsync(
+    QueryPoints.newBuilder()
+        .setCollectionName("my_collection")
+        .setQuery(nearest(0.1f, 0.2f, 0.3f, 0.4f))
+        .setLimit(10)
+        .setWithPayload(enable(true))
+        .build()
+).get();
+```
+
+## Payload Operations
+
+### Set Payload
+
+```java
+import static io.qdrant.client.PointIdFactory.id;
+import static io.qdrant.client.ValueFactory.value;
+
+client.setPayloadAsync(
+    "my_collection",
+    Map.of(
+        "new_field", value("value"),
+        "updated_at", value("2024-01-01")
+    ),
+    List.of(id(1), id(2), id(3)),
+    null,
+    null,
+    null
+).get();
+```
+
+### Overwrite Payload
+
+```java
+client.overwritePayloadAsync(
+    "my_collection",
+    Map.of("only_field", value("value")),
+    List.of(id(1), id(2)),
+    null,
+    null,
+    null
+).get();
+```
+
+### Delete Payload Keys
+
+```java
+client.deletePayloadAsync(
+    "my_collection",
+    List.of("old_field", "deprecated"),
+    List.of(id(1), id(2), id(3)),
+    null,
+    null,
+    null
+).get();
+```
+
+### Clear Payload
+
+```java
+client.clearPayloadAsync(
+    "my_collection",
+    List.of(id(1), id(2), id(3)),
+    null,
+    null,
+    null
+).get();
+```
+
+## Scroll (Pagination)
+
+```java
+import io.qdrant.client.grpc.Points.*;
+
+PointId offset = null;
+List<RetrievedPoint> allPoints = new ArrayList<>();
+
+while (true) {
+    List<RetrievedPoint> points = client.scrollAsync(
+        ScrollPoints.newBuilder()
+            .setCollectionName("my_collection")
+            .setLimit(100)
+            .setOffset(offset != null ? offset : PointId.getDefaultInstance())
+            .setWithPayload(enable(true))
+            .build()
+    ).get();
+
+    allPoints.addAll(points);
+    
+    if (points.isEmpty() || points.size() < 100) {
+        break;
+    }
+    
+    offset = points.get(points.size() - 1).getId();
+}
+
+System.out.println("Total points: " + allPoints.size());
+```
+
+## Payload Indexing
+
+```java
+import io.qdrant.client.grpc.Points.*;
+
+// Create keyword index
+client.createPayloadIndexAsync(
+    "my_collection",
+    "category",
+    PayloadSchemaType.Keyword,
+    null,
+    null,
+    null
+).get();
+
+// Create text index
+client.createPayloadIndexAsync(
+    "my_collection",
+    "description",
+    PayloadSchemaType.Text,
+    PayloadIndexParams.newBuilder()
+        .setTextIndexParams(TextIndexParams.newBuilder()
+            .setTokenizer(TokenizerType.Word)
+            .setLowercase(true)
+            .setMinTokenLen(2)
+            .setMaxTokenLen(20)
+            .build())
+        .build(),
+    null,
+    null
+).get();
+
+// Delete index
+client.deletePayloadIndexAsync(
+    "my_collection",
+    "category",
+    null,
+    null
+).get();
+```
+
+## Count Points
+
+```java
+import io.qdrant.client.grpc.Points.*;
+
+long count = client.countAsync(
+    CountPoints.newBuilder()
+        .setCollectionName("my_collection")
+        .setExact(true)
+        .build()
+).get();
+
+System.out.println("Total points: " + count);
+```
+
+## Error Handling
+
+```java
+import io.grpc.StatusRuntimeException;
+import io.grpc.Status;
+
+try {
+    CollectionInfo info = client.getCollectionInfoAsync("nonexistent").get();
+} catch (ExecutionException e) {
+    if (e.getCause() instanceof StatusRuntimeException) {
+        StatusRuntimeException grpcException = (StatusRuntimeException) e.getCause();
+        
+        if (grpcException.getStatus().getCode() == Status.Code.NOT_FOUND) {
+            System.out.println("Collection not found");
+        } else {
+            System.err.println("gRPC error: " + grpcException.getStatus());
+        }
+    } else {
+        System.err.println("Unexpected error: " + e.getMessage());
+    }
+}
+```
+
+## CompletableFuture Support
+
+```java
+import java.util.concurrent.CompletableFuture;
+import java.util.List;
+
+// All async methods return CompletableFuture
+CompletableFuture<List<ScoredPoint>> searchFuture = client.searchAsync(
+    SearchPoints.newBuilder()
+        .setCollectionName("my_collection")
+        .addAllVector(List.of(0.2f, 0.1f, 0.9f))
+        .setLimit(10)
+        .build()
+);
+
+// Chain operations
+searchFuture
+    .thenApply(results -> {
+        System.out.println("Found " + results.size() + " results");
+        return results;
+    })
+    .thenAccept(results -> {
+        results.forEach(point -> 
+            System.out.println("ID: " + point.getId())
+        );
+    })
+    .exceptionally(ex -> {
+        System.err.println("Search failed: " + ex.getMessage());
+        return null;
+    });
+```
+
+## Reactive Programming
+
+```java
+import io.reactivex.rxjava3.core.Observable;
+import java.util.concurrent.CompletableFuture;
+
+// Convert CompletableFuture to Observable
+Observable<List<ScoredPoint>> searchObservable = 
+    Observable.fromCompletionStage(
+        client.searchAsync(
+            SearchPoints.newBuilder()
+                .setCollectionName("my_collection")
+                .addAllVector(List.of(0.2f, 0.1f, 0.9f))
+                .setLimit(10)
+                .build()
+        )
+    );
+
+searchObservable
+    .flatMapIterable(results -> results)
+    .filter(point -> point.getScore() > 0.7)
+    .subscribe(
+        point -> System.out.println("ID: " + point.getId()),
+        error -> System.err.println("Error: " + error),
+        () -> System.out.println("Completed")
+    );
+```
+
+## Spring Boot Integration
+
+```java
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import io.qdrant.client.QdrantClient;
+import io.qdrant.client.QdrantGrpcClient;
+
+@Configuration
+public class QdrantConfig {
+    
+    @Bean
+    public QdrantClient qdrantClient() {
+        return new QdrantClient(
+            QdrantGrpcClient.newBuilder("localhost", 6334, false).build()
+        );
+    }
+}
+
+// Service class
+import org.springframework.stereotype.Service;
+
+@Service
+public class SearchService {
+    
+    private final QdrantClient client;
+    
+    public SearchService(QdrantClient client) {
+        this.client = client;
+    }
+    
+    public List<ScoredPoint> search(float[] vector) 
+            throws InterruptedException, ExecutionException {
+        return client.searchAsync(
+            SearchPoints.newBuilder()
+                .setCollectionName("my_collection")
+                .addAllVector(Arrays.stream(vector)
+                    .boxed()
+                    .collect(Collectors.toList()))
+                .setLimit(10)
+                .build()
+        ).get();
+    }
+}
+```
+
+## Best Practices
+
+<Tip>
+  **Performance tips:**
+  - Reuse QdrantClient instances (singleton pattern)
+  - Use CompletableFuture for async operations
+  - Leverage batch operations for bulk inserts
+  - Configure appropriate timeouts for long operations
+  - Always close the client when done
+</Tip>
+
+<Warning>
+  **Common issues:**
+  - Always handle ExecutionException for async operations
+  - Use appropriate gRPC error handling
+  - Ensure vector dimensions match collection config
+  - Don't forget to call .get() on async methods
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Python Client" icon="python" href="/api/clients/python">
+    Python client documentation
+  </Card>
+  <Card title="gRPC API" icon="bolt" href="/api/grpc/overview">
+    Learn about gRPC protocol
+  </Card>
+</CardGroup>

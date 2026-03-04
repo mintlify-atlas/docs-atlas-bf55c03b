@@ -1,0 +1,328 @@
+---
+title: Snapshots API
+description: REST API endpoints for creating, managing, and restoring snapshots in Qdrant
+---
+
+Snapshots provide a way to create backups of collections and the entire Qdrant storage. Use these endpoints to create snapshots, download them, and restore from backups.
+
+## Create Collection Snapshot
+
+Create a new snapshot for a specific collection.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/snapshots'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to snapshot
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for the snapshot to complete. If false, let it happen in background. Default is true.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="name" type="string">
+    Snapshot filename
+  </ResponseField>
+  <ResponseField name="creation_time" type="string">
+    ISO 8601 timestamp of creation
+  </ResponseField>
+  <ResponseField name="size" type="integer">
+    Snapshot size in bytes
+  </ResponseField>
+  <ResponseField name="checksum" type="string">
+    SHA256 checksum of the snapshot file
+  </ResponseField>
+</ResponseField>
+
+## List Collection Snapshots
+
+Get a list of all snapshots for a specific collection.
+
+```bash
+curl -X GET 'http://localhost:6333/collections/{collection_name}/snapshots'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="array">
+  Array of snapshot descriptions
+  
+  <ResponseField name="name" type="string">
+    Snapshot filename
+  </ResponseField>
+  
+  <ResponseField name="creation_time" type="string">
+    ISO 8601 timestamp
+  </ResponseField>
+  
+  <ResponseField name="size" type="integer">
+    Size in bytes
+  </ResponseField>
+  
+  <ResponseField name="checksum" type="string">
+    SHA256 checksum
+  </ResponseField>
+</ResponseField>
+
+## Download Collection Snapshot
+
+Download a specific collection snapshot as a file.
+
+```bash
+curl -X GET 'http://localhost:6333/collections/{collection_name}/snapshots/{snapshot_name}' \
+  -o snapshot.tar
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="snapshot_name" type="string" required>
+  Name of the snapshot to download
+</ParamField>
+
+**Response**
+
+Binary snapshot file (application/octet-stream)
+
+## Delete Collection Snapshot
+
+Delete a specific collection snapshot.
+
+```bash
+curl -X DELETE 'http://localhost:6333/collections/{collection_name}/snapshots/{snapshot_name}'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="snapshot_name" type="string" required>
+  Name of the snapshot to delete
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for deletion to complete. Default is true.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if snapshot was deleted successfully
+</ResponseField>
+
+## Recover from Snapshot
+
+Recover local collection data from an existing snapshot. This will overwrite any data stored on this node for the collection.
+
+```bash
+curl -X PUT 'http://localhost:6333/collections/{collection_name}/snapshots/recover' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "location": "http://example.com/snapshots/my-snapshot.tar"
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to recover. If collection does not exist, it will be created.
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for recovery to complete. If false, let it happen in background. Default is true.
+</ParamField>
+
+**Request Body**
+
+<ParamField body="location" type="string" required>
+  URL or file path of the snapshot to recover from
+</ParamField>
+
+<ParamField body="priority" type="string">
+  Defines source of truth for recovery: `snapshot` or `replica`. Default is `replica`.
+</ParamField>
+
+<ParamField body="checksum" type="string">
+  Optional SHA256 checksum to verify snapshot integrity
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if recovery started/completed successfully
+</ResponseField>
+
+## Upload and Recover from Snapshot
+
+Upload a snapshot file and recover collection data from it.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/snapshots/upload' \
+  -F 'snapshot=@/path/to/snapshot.tar'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to recover. If collection does not exist, it will be created.
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for recovery to complete. Default is true.
+</ParamField>
+
+<ParamField query="priority" type="string">
+  Defines source of truth: `snapshot` or `replica`
+</ParamField>
+
+<ParamField query="checksum" type="string">
+  Optional SHA256 checksum to verify snapshot integrity before recovery
+</ParamField>
+
+**Request Body**
+
+Multipart form data with snapshot file
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if recovery started/completed successfully
+</ResponseField>
+
+## Create Full Storage Snapshot
+
+Create a snapshot of the entire Qdrant storage, including all collections.
+
+```bash
+curl -X POST 'http://localhost:6333/snapshots'
+```
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for the snapshot to complete. If false, let it happen in background. Default is true.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="name" type="string">
+    Snapshot filename
+  </ResponseField>
+  <ResponseField name="creation_time" type="string">
+    ISO 8601 timestamp of creation
+  </ResponseField>
+  <ResponseField name="size" type="integer">
+    Snapshot size in bytes
+  </ResponseField>
+  <ResponseField name="checksum" type="string">
+    SHA256 checksum
+  </ResponseField>
+</ResponseField>
+
+## List Full Storage Snapshots
+
+Get a list of all full storage snapshots.
+
+```bash
+curl -X GET 'http://localhost:6333/snapshots'
+```
+
+**Response**
+
+<ResponseField name="result" type="array">
+  Array of snapshot descriptions for all storage snapshots
+</ResponseField>
+
+## Download Full Storage Snapshot
+
+Download a full storage snapshot as a file.
+
+```bash
+curl -X GET 'http://localhost:6333/snapshots/{snapshot_name}' \
+  -o full-snapshot.tar
+```
+
+**Path Parameters**
+
+<ParamField path="snapshot_name" type="string" required>
+  Name of the snapshot to download
+</ParamField>
+
+**Response**
+
+Binary snapshot file (application/octet-stream)
+
+## Delete Full Storage Snapshot
+
+Delete a full storage snapshot.
+
+```bash
+curl -X DELETE 'http://localhost:6333/snapshots/{snapshot_name}'
+```
+
+**Path Parameters**
+
+<ParamField path="snapshot_name" type="string" required>
+  Name of the snapshot to delete
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for deletion to complete. Default is true.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if snapshot was deleted successfully
+</ResponseField>
+
+## Download Shard Snapshot
+
+Stream the current state of a shard as a snapshot file. This is useful for shard-level backup and replication.
+
+```bash
+curl -X GET 'http://localhost:6333/collections/{collection_name}/shards/{shard_id}/snapshot' \
+  -o shard-snapshot.tar
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="shard_id" type="integer" required>
+  ID of the shard to snapshot
+</ParamField>
+
+**Response**
+
+Binary shard snapshot file (application/octet-stream)

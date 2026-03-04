@@ -1,0 +1,570 @@
+---
+title: Multi-Tenancy
+description: Implement efficient multi-tenant architectures using payload filtering, partitioning strategies, and tenant-specific optimizations
+---
+
+Multi-tenancy allows you to serve multiple customers (tenants) from a single Qdrant collection while maintaining data isolation and performance. Qdrant provides several strategies to implement multi-tenancy efficiently.
+
+## Architecture Approaches
+
+<CardGroup cols={3}>
+  <Card title="Collection per Tenant" icon="database">
+    **Isolation**: Maximum
+    
+    **Complexity**: High
+    
+    **Best for**: Less than 10 tenants
+  </Card>
+  <Card title="Payload Filtering" icon="filter">
+    **Isolation**: Logical
+    
+    **Complexity**: Low
+    
+    **Best for**: 100s-1000s tenants
+  </Card>
+  <Card title="Shard Keys" icon="key">
+    **Isolation**: Physical
+    
+    **Complexity**: Medium
+    
+    **Best for**: 10s-100s tenants
+  </Card>
+</CardGroup>
+
+## Payload Filtering Approach
+
+The most common and scalable approach: store all tenants in one collection with a tenant identifier in the payload.
+
+### Collection Setup
+
+```json
+PUT /collections/multi_tenant_data
+{
+  "vectors": {
+    "size": 384,
+    "distance": "Cosine"
+  }
+}
+```
+
+### Creating Tenant Index
+
+Mark the tenant field with `is_tenant: true` for optimization:
+
+```json
+PUT /collections/multi_tenant_data/index
+{
+  "field_name": "tenant_id",
+  "field_schema": {
+    "type": "keyword",
+    "is_tenant": true
+  }
+}
+```
+
+<Info>
+The `is_tenant` flag tells Qdrant to optimize the index structure for frequent tenant-specific filtering.
+</Info>
+
+### Inserting Tenant Data
+
+```json
+PUT /collections/multi_tenant_data/points
+{
+  "points": [
+    {
+      "id": 1,
+      "vector": [0.1, 0.2, 0.3, ...],
+      "payload": {
+        "tenant_id": "tenant_a",
+        "content": "Document for tenant A"
+      }
+    },
+    {
+      "id": 2,
+      "vector": [0.4, 0.5, 0.6, ...],
+      "payload": {
+        "tenant_id": "tenant_b",
+        "content": "Document for tenant B"
+      }
+    }
+  ]
+}
+```
+
+### Searching with Tenant Filter
+
+Always filter by tenant in your searches:
+
+```json
+POST /collections/multi_tenant_data/points/search
+{
+  "vector": [0.1, 0.2, 0.3, ...],
+  "filter": {
+    "must": [
+      {
+        "key": "tenant_id",
+        "match": {
+          "value": "tenant_a"
+        }
+      }
+    ]
+  },
+  "limit": 10
+}
+```
+
+### Python Example
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", port=6333)
+
+# Create tenant index
+client.create_payload_index(
+    collection_name="multi_tenant_data",
+    field_name="tenant_id",
+    field_schema=models.KeywordIndexParams(
+        type="keyword",
+        is_tenant=True
+    )
+)
+
+# Search for specific tenant
+results = client.search(
+    collection_name="multi_tenant_data",
+    query_vector=[0.1, 0.2, 0.3, ...],
+    query_filter=models.Filter(
+        must=[
+            models.FieldCondition(
+                key="tenant_id",
+                match=models.MatchValue(value="tenant_a")
+            )
+        ]
+    ),
+    limit=10
+)
+```
+
+## Tenant Index Optimization
+
+### What `is_tenant` Does
+
+When you mark a field with `is_tenant: true`:
+
+1. **HNSW graph optimization**: Qdrant builds more aggressive HNSW links within tenant boundaries
+2. **Payload index structure**: Optimized for tenant-specific lookups
+3. **Query planning**: Tenant filters are pushed down early in query execution
+
+### Index Types Supporting is_tenant
+
+<Tabs>
+  <Tab title="Keyword">
+    ```json
+    {
+      "field_name": "tenant_id",
+      "field_schema": {
+        "type": "keyword",
+        "is_tenant": true
+      }
+    }
+    ```
+    
+    Best for string tenant IDs.
+  </Tab>
+  <Tab title="UUID">
+    ```json
+    {
+      "field_name": "tenant_id",
+      "field_schema": {
+        "type": "uuid",
+        "is_tenant": true
+      }
+    }
+    ```
+    
+    Best for UUID tenant IDs.
+  </Tab>
+  <Tab title="Integer">
+    ```json
+    {
+      "field_name": "tenant_id",
+      "field_schema": {
+        "type": "integer",
+        "is_principal": true
+      }
+    }
+    ```
+    
+    For integer tenant IDs, use `is_principal` instead.
+  </Tab>
+</Tabs>
+
+## Shard Key Partitioning
+
+For physical isolation of tenant data within a collection, use shard keys.
+
+### Creating Sharded Collection
+
+```json
+PUT /collections/sharded_tenants
+{
+  "vectors": {
+    "size": 384,
+    "distance": "Cosine"
+  },
+  "shard_number": 6,
+  "sharding_method": "custom"
+}
+```
+
+### Creating Tenant Shards
+
+Create dedicated shards for specific tenants:
+
+```bash
+PUT /collections/sharded_tenants/shards
+{
+  "shard_key": "tenant_a"
+}
+```
+
+### Inserting to Specific Shard
+
+```json
+PUT /collections/sharded_tenants/points?shard_key=tenant_a
+{
+  "points": [
+    {
+      "id": 1,
+      "vector": [0.1, 0.2, 0.3, ...],
+      "payload": {
+        "content": "Tenant A data"
+      }
+    }
+  ]
+}
+```
+
+### Searching Specific Shard
+
+```json
+POST /collections/sharded_tenants/points/search?shard_key=tenant_a
+{
+  "vector": [0.1, 0.2, 0.3, ...],
+  "limit": 10
+}
+```
+
+<Note>
+Using shard keys automatically routes operations to the correct physical shard, avoiding unnecessary cross-shard operations.
+</Note>
+
+## Tenant Migration
+
+Move a tenant to its own dedicated shard:
+
+```bash
+# 1. Create target shard
+PUT /collections/main/shards
+{
+  "shard_key": "tenant_premium"
+}
+
+# 2. Replicate points to new shard
+POST /collections/main/points/replicate
+{
+  "filter": {
+    "must": [
+      {"key": "tenant_id", "match": {"value": "tenant_premium"}}
+    ]
+  },
+  "to_shard_key": "tenant_premium"
+}
+
+# 3. Delete from old location (optional)
+POST /collections/main/points/delete
+{
+  "filter": {
+    "must": [
+      {"key": "tenant_id", "match": {"value": "tenant_premium"}}
+    ]
+  },
+  "shard_key_selector": ["default"]
+}
+```
+
+## Performance Considerations
+
+### Query Performance
+
+<AccordionGroup>
+  <Accordion title="Always Use Indexed Filters">
+    Create payload indexes on tenant identifiers. Without indexes, filtering requires scanning all points.
+    
+    ```python
+    # Good - uses index
+    client.create_payload_index(
+        collection_name="data",
+        field_name="tenant_id",
+        field_schema="keyword"
+    )
+    ```
+  </Accordion>
+  
+  <Accordion title="Enable is_tenant Optimization">
+    Mark tenant fields with `is_tenant: true` to enable HNSW graph optimizations:
+    
+    ```json
+    {"is_tenant": true}
+    ```
+    
+    This builds better connections within tenant boundaries.
+  </Accordion>
+  
+  <Accordion title="Disable Global HNSW for Pure Multi-Tenancy">
+    If you ALWAYS filter by tenant, disable global HNSW:
+    
+    ```json
+    {
+      "hnsw_config": {
+        "m": 0
+      }
+    }
+    ```
+    
+    This saves memory and forces optimized tenant-specific search.
+  </Accordion>
+</AccordionGroup>
+
+### Memory Management
+
+**Per-tenant data distribution**:
+- Monitor tenant sizes to prevent skew
+- Consider separate collections for extremely large tenants
+- Use quantization to reduce per-point memory usage
+
+**HNSW graph memory**:
+- Disabled global HNSW (m=0): Only stores tenant-specific graphs
+- Enabled global HNSW: Stores full graph across all tenants
+
+### Scaling Guidelines
+
+<Tabs>
+  <Tab title="Small (< 100 tenants)">
+    **Strategy**: Payload filtering
+    
+    **Configuration**:
+    - Single collection
+    - Tenant index with `is_tenant: true`
+    - Global HNSW enabled
+    
+    **Characteristics**:
+    - Simple management
+    - Efficient resource usage
+    - Good performance
+  </Tab>
+  <Tab title="Medium (100-1000 tenants)">
+    **Strategy**: Payload filtering + selective sharding
+    
+    **Configuration**:
+    - Single collection
+    - Tenant index with `is_tenant: true`
+    - Dedicated shards for largest tenants
+    - Global HNSW may be disabled
+    
+    **Characteristics**:
+    - Balanced complexity
+    - Optimized for large tenants
+    - Moderate resource usage
+  </Tab>
+  <Tab title="Large (> 1000 tenants)">
+    **Strategy**: Payload filtering + tiered approach
+    
+    **Configuration**:
+    - Multiple collections by tenant tier
+    - Small tenants: shared collection
+    - Medium tenants: sharded collection
+    - Large tenants: dedicated collections
+    - Disabled global HNSW (m=0)
+    
+    **Characteristics**:
+    - Complex management
+    - Maximum performance isolation
+    - Optimized resource allocation
+  </Tab>
+</Tabs>
+
+## Isolation and Security
+
+### Data Isolation
+
+Payload filtering provides **logical isolation** only:
+
+<Warning>
+Payload filtering does NOT provide cryptographic isolation. All tenant data exists in the same physical storage. For regulatory compliance requiring physical separation, use separate collections or shard keys.
+</Warning>
+
+### Access Control
+
+Implement tenant isolation at the application layer:
+
+```python
+class TenantAwareSearch:
+    def __init__(self, client, tenant_id):
+        self.client = client
+        self.tenant_id = tenant_id
+    
+    def search(self, query_vector, **kwargs):
+        # Automatically inject tenant filter
+        tenant_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="tenant_id",
+                    match=models.MatchValue(value=self.tenant_id)
+                )
+            ]
+        )
+        
+        # Merge with any existing filters
+        if 'query_filter' in kwargs:
+            kwargs['query_filter'].must.extend(tenant_filter.must)
+        else:
+            kwargs['query_filter'] = tenant_filter
+        
+        return self.client.search(
+            collection_name="multi_tenant_data",
+            query_vector=query_vector,
+            **kwargs
+        )
+
+# Usage
+tenant_search = TenantAwareSearch(client, "tenant_a")
+results = tenant_search.search([0.1, 0.2, 0.3])
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Design Tenant ID Strategy">
+    Choose stable, immutable tenant identifiers:
+    - UUIDs for maximum flexibility
+    - Integer IDs for compact storage
+    - String keys for human readability
+  </Step>
+  
+  <Step title="Create Proper Indexes">
+    Always index tenant fields before loading data:
+    ```python
+    client.create_payload_index(
+        collection_name="data",
+        field_name="tenant_id",
+        field_schema=models.KeywordIndexParams(is_tenant=True)
+    )
+    ```
+  </Step>
+  
+  <Step title="Monitor Tenant Distribution">
+    Track per-tenant sizes and query patterns:
+    - Large tenants may need dedicated shards
+    - Inactive tenants can be archived
+    - Hot tenants may need special handling
+  </Step>
+  
+  <Step title="Test Isolation">
+    Verify filters work correctly:
+    ```python
+    # Ensure tenant A doesn't see tenant B data
+    results = search_with_tenant_filter("tenant_a")
+    assert all(r.payload["tenant_id"] == "tenant_a" for r in results)
+    ```
+  </Step>
+</Steps>
+
+## Common Patterns
+
+### Hierarchical Tenancy
+
+Organization → Team → User hierarchy:
+
+```json
+{
+  "payload": {
+    "org_id": "org_123",
+    "team_id": "team_456",
+    "user_id": "user_789",
+    "content": "Document"
+  }
+}
+```
+
+Filter at appropriate level:
+
+```json
+// Organization-wide search
+{"must": [{"key": "org_id", "match": {"value": "org_123"}}]}
+
+// Team-specific search
+{"must": [
+  {"key": "org_id", "match": {"value": "org_123"}},
+  {"key": "team_id", "match": {"value": "team_456"}}
+]}
+```
+
+### Multi-Tenant with Regional Data
+
+Combine tenant and region filtering:
+
+```json
+{
+  "payload": {
+    "tenant_id": "tenant_a",
+    "region": "eu-west",
+    "content": "Data"
+  }
+}
+```
+
+Use compound filters:
+
+```json
+{
+  "must": [
+    {"key": "tenant_id", "match": {"value": "tenant_a"}},
+    {"key": "region", "match": {"value": "eu-west"}}
+  ]
+}
+```
+
+## Monitoring and Observability
+
+Track these metrics per tenant:
+
+- **Point count**: Number of vectors per tenant
+- **Query latency**: P50, P95, P99 search times
+- **Query volume**: Requests per tenant per time period
+- **Storage usage**: Disk/memory consumption per tenant
+- **Indexing lag**: Time to index new tenant data
+
+```python
+# Get tenant statistics
+def get_tenant_stats(client, collection, tenant_id):
+    count_result = client.count(
+        collection_name=collection,
+        count_filter=models.Filter(
+            must=[models.FieldCondition(
+                key="tenant_id",
+                match=models.MatchValue(value=tenant_id)
+            )]
+        ),
+        exact=True
+    )
+    return {"tenant_id": tenant_id, "count": count_result.count}
+```
+
+## Related Topics
+
+- [Filtering](/filtering) - Learn more about payload filtering capabilities
+- [Sharding](/distributed/sharding) - Detailed guide on shard key strategies
+- [Indexing](/indexing) - Optimize payload indexes for tenant fields

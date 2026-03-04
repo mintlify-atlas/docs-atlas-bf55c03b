@@ -1,0 +1,435 @@
+---
+title: Search Points
+description: Learn how to perform vector similarity search in Qdrant using the search API with various parameters and filters.
+---
+
+Search is the core operation in Qdrant. It finds the nearest neighbors to a given query vector based on the configured distance metric.
+
+## API Endpoint
+
+```
+POST /collections/{collection_name}/points/search
+```
+
+## Basic Vector Search
+
+Find points most similar to your query vector.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    limit=10
+)
+
+for result in results:
+    print(f"ID: {result.id}, Score: {result.score}")
+```
+
+</CodeGroup>
+
+## Search Parameters
+
+<ParamField path="vector" type="array" required>
+  Query vector to search for. Must match the collection's vector dimensions.
+</ParamField>
+
+<ParamField path="limit" type="integer" default="10">
+  Maximum number of results to return.
+</ParamField>
+
+<ParamField path="offset" type="integer" default="0">
+  Skip first N results. Useful for pagination.
+</ParamField>
+
+<ParamField path="score_threshold" type="number">
+  Minimum score threshold. Only return results with score above this value.
+</ParamField>
+
+<ParamField path="with_payload" type="boolean | array">
+  Include payload in the results. Can be `true`, `false`, or an array of specific fields.
+</ParamField>
+
+<ParamField path="with_vector" type="boolean | array">
+  Include vectors in the results. Can be `true`, `false`, or an array of specific vector names.
+</ParamField>
+
+<ParamField path="filter" type="object">
+  Filter conditions to apply. See the filtering guide for details.
+</ParamField>
+
+## Search with Score Threshold
+
+Only return results that meet a minimum similarity score.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "limit": 10,
+    "score_threshold": 0.8
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    limit=10,
+    score_threshold=0.8
+)
+```
+
+</CodeGroup>
+
+<Note>
+  The score threshold interpretation depends on the distance metric:
+  - **Cosine**: 0 to 1 (higher is more similar)
+  - **Dot**: -∞ to +∞ (higher is more similar)
+  - **Euclid**: 0 to +∞ (lower is more similar)
+</Note>
+
+## Control Payload and Vector Returns
+
+### Return Specific Payload Fields
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "limit": 5,
+    "with_payload": ["city", "country"]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    limit=5,
+    with_payload=["city", "country"]
+)
+```
+
+</CodeGroup>
+
+### Include/Exclude Vectors
+
+<Tabs>
+  <Tab title="Include vectors">
+    ```json
+    {
+      "vector": [0.2, 0.1, 0.9, 0.7],
+      "limit": 5,
+      "with_vector": true
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Exclude vectors">
+    ```json
+    {
+      "vector": [0.2, 0.1, 0.9, 0.7],
+      "limit": 5,
+      "with_vector": false
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Specific named vectors">
+    ```json
+    {
+      "vector": [0.2, 0.1, 0.9, 0.7],
+      "limit": 5,
+      "with_vector": ["text", "image"]
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Search with Named Vectors
+
+For collections with multiple named vectors, specify which vector to search.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/multi_vector_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": {
+      "name": "text",
+      "vector": [0.2, 0.1, 0.9, 0.7]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="multi_vector_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    using="text",
+    limit=10
+)
+```
+
+</CodeGroup>
+
+## Search with Filters
+
+Combine vector similarity with payload filtering.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "key": "country",
+          "match": {
+            "value": "Germany"
+          }
+        }
+      ]
+    },
+    "limit": 5
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            FieldCondition(
+                key="country",
+                match=MatchValue(value="Germany")
+            )
+        ]
+    ),
+    limit=5
+)
+```
+
+</CodeGroup>
+
+## Advanced Search Parameters
+
+### Search Params
+
+Fine-tune the search algorithm for better performance or accuracy.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "limit": 10,
+    "params": {
+      "hnsw_ef": 128,
+      "exact": false
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import SearchParams
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    limit=10,
+    search_params=SearchParams(
+        hnsw_ef=128,
+        exact=False
+    )
+)
+```
+
+</CodeGroup>
+
+<ParamField path="params.hnsw_ef" type="integer" default="dynamic">
+  Size of the dynamic candidate list for HNSW index. Higher values improve accuracy but reduce speed.
+</ParamField>
+
+<ParamField path="params.exact" type="boolean" default="false">
+  If `true`, perform exact search (brute force) instead of approximate search.
+</ParamField>
+
+<ParamField path="params.indexed_only" type="boolean" default="false">
+  If `true`, only search indexed vectors, skip unindexed segments.
+</ParamField>
+
+## Batch Search
+
+Perform multiple searches in a single request for better efficiency.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search/batch \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "searches": [
+      {
+        "vector": [0.2, 0.1, 0.9, 0.7],
+        "limit": 3
+      },
+      {
+        "vector": [0.5, 0.3, 0.2, 0.8],
+        "limit": 3
+      }
+    ]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import SearchRequest
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search_batch(
+    collection_name="my_collection",
+    requests=[
+        SearchRequest(
+            vector=[0.2, 0.1, 0.9, 0.7],
+            limit=3
+        ),
+        SearchRequest(
+            vector=[0.5, 0.3, 0.2, 0.8],
+            limit=3
+        )
+    ]
+)
+```
+
+</CodeGroup>
+
+## Response Format
+
+<ResponseField name="result" type="array">
+  Array of scored points.
+  
+  <ResponseField name="result[].id" type="integer | string">
+    Point ID.
+  </ResponseField>
+  
+  <ResponseField name="result[].version" type="integer">
+    Point version.
+  </ResponseField>
+  
+  <ResponseField name="result[].score" type="number">
+    Similarity score.
+  </ResponseField>
+  
+  <ResponseField name="result[].payload" type="object">
+    Point payload (if requested).
+  </ResponseField>
+  
+  <ResponseField name="result[].vector" type="array | object">
+    Point vector(s) (if requested).
+  </ResponseField>
+</ResponseField>
+
+```json Response Example
+{
+  "result": [
+    {
+      "id": 1,
+      "version": 3,
+      "score": 0.95,
+      "payload": {
+        "city": "Berlin",
+        "country": "Germany"
+      },
+      "vector": [0.2, 0.15, 0.88, 0.72]
+    },
+    {
+      "id": 5,
+      "version": 2,
+      "score": 0.87,
+      "payload": {
+        "city": "Munich",
+        "country": "Germany"
+      }
+    }
+  ],
+  "status": "ok",
+  "time": 0.001234
+}
+```
+
+## Query Parameters
+
+<ParamField query="consistency" type="string">
+  Read consistency level:
+  - `majority` - Wait for majority of replicas
+  - `quorum` - Wait for quorum of replicas  
+  - `all` - Wait for all replicas
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Operation timeout in seconds.
+</ParamField>
+
+<Warning>
+  Large `limit` values (>1000) may impact performance. Consider pagination for large result sets.
+</Warning>
+
+## Best Practices
+
+1. **Limit Size**: Keep limit values reasonable (10-100) for best performance
+2. **Score Threshold**: Use score thresholds to filter out low-quality results
+3. **Payload Selection**: Only request needed payload fields to reduce response size
+4. **Batch Requests**: Use batch search when performing multiple searches
+5. **HNSW EF**: Increase `hnsw_ef` for better accuracy at the cost of speed

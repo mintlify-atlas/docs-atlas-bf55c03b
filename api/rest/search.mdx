@@ -1,0 +1,640 @@
+---
+title: Search API
+description: REST API endpoints for vector similarity search, recommendations, and query operations in Qdrant
+---
+
+Qdrant provides powerful search capabilities including vector similarity search, recommendation systems, and flexible query APIs. These endpoints help you find similar vectors and implement semantic search.
+
+## Search Points
+
+Retrieve the closest points based on vector similarity and optional filtering conditions.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/search' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "limit": 3
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to search in
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level: `majority`, `quorum`, or `all`
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="vector" type="array | object" required>
+  Vector to search for. Can be a dense vector array, sparse vector, or named vector.
+</ParamField>
+
+<ParamField body="limit" type="integer">
+  Maximum number of results to return. Default is 10.
+</ParamField>
+
+<ParamField body="offset" type="integer">
+  Offset for pagination. Default is 0.
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter conditions to apply
+  
+  <ParamField body="must" type="array">
+    All conditions must match
+  </ParamField>
+  
+  <ParamField body="should" type="array">
+    At least one condition must match
+  </ParamField>
+  
+  <ParamField body="must_not" type="array">
+    All conditions must NOT match
+  </ParamField>
+</ParamField>
+
+<ParamField body="params" type="object">
+  Search parameters
+  
+  <ParamField body="hnsw_ef" type="integer">
+    HNSW graph exploration factor. Higher values = more accurate but slower.
+  </ParamField>
+  
+  <ParamField body="exact" type="boolean">
+    If true, perform exact search instead of approximate
+  </ParamField>
+  
+  <ParamField body="quantization" type="object">
+    Quantization search parameters
+  </ParamField>
+</ParamField>
+
+<ParamField body="score_threshold" type="float">
+  Only return results with a score above this threshold
+</ParamField>
+
+<ParamField body="with_payload" type="boolean | array | object">
+  Whether to return payload. Can be `true`, `false`, array of field names, or include/exclude object.
+</ParamField>
+
+<ParamField body="with_vector" type="boolean | array">
+  Whether to return vectors. Can be `true`, `false`, or array of vector names.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="array">
+  Array of scored points
+  
+  <ResponseField name="id" type="integer | string">
+    Point ID
+  </ResponseField>
+  
+  <ResponseField name="score" type="float">
+    Similarity score
+  </ResponseField>
+  
+  <ResponseField name="payload" type="object">
+    Point payload (if requested)
+  </ResponseField>
+  
+  <ResponseField name="vector" type="array | object">
+    Point vector (if requested)
+  </ResponseField>
+</ResponseField>
+
+## Batch Search
+
+Perform multiple search queries in a single request for better performance.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/search/batch' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "searches": [
+      {
+        "vector": [0.2, 0.1, 0.9, 0.7],
+        "limit": 3
+      },
+      {
+        "vector": [0.5, 0.3, 0.2, 0.3],
+        "limit": 3,
+        "filter": {
+          "must": [{"key": "city", "match": {"value": "London"}}]
+        }
+      }
+    ]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to search in
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="searches" type="array" required>
+  Array of search requests. Each search has the same parameters as the single search endpoint.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="array">
+  Array of result arrays, one for each search query
+</ResponseField>
+
+## Search Groups
+
+Search for points grouped by a specific payload field.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/search/groups' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "group_by": "city",
+    "limit": 3,
+    "group_size": 2
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to search in
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="vector" type="array | object" required>
+  Vector to search for
+</ParamField>
+
+<ParamField body="group_by" type="string" required>
+  Payload field to group results by
+</ParamField>
+
+<ParamField body="limit" type="integer" required>
+  Maximum number of groups to return
+</ParamField>
+
+<ParamField body="group_size" type="integer" required>
+  Maximum number of points per group
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter conditions
+</ParamField>
+
+<ParamField body="with_payload" type="boolean | array | object">
+  Whether to return payload
+</ParamField>
+
+<ParamField body="with_vector" type="boolean | array">
+  Whether to return vectors
+</ParamField>
+
+<ParamField body="with_lookup" type="object">
+  Join payload from another collection
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="groups" type="array">
+    Array of groups
+    
+    <ResponseField name="id" type="any">
+      Group identifier (value of the group_by field)
+    </ResponseField>
+    
+    <ResponseField name="hits" type="array">
+      Points in this group
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+## Recommend Points
+
+Get recommendations based on positive and negative example points.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/recommend' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "positive": [1, 2],
+    "negative": [3],
+    "limit": 5
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="positive" type="array" required>
+  Array of point IDs or vectors to use as positive examples
+</ParamField>
+
+<ParamField body="negative" type="array">
+  Array of point IDs or vectors to use as negative examples
+</ParamField>
+
+<ParamField body="limit" type="integer">
+  Maximum number of results to return
+</ParamField>
+
+<ParamField body="offset" type="integer">
+  Offset for pagination
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter conditions
+</ParamField>
+
+<ParamField body="using" type="string">
+  Vector name to use for recommendation (for named vectors)
+</ParamField>
+
+<ParamField body="lookup_from" type="object">
+  Lookup positive/negative examples from another collection
+</ParamField>
+
+<ParamField body="score_threshold" type="float">
+  Minimum score threshold
+</ParamField>
+
+<ParamField body="with_payload" type="boolean | array | object">
+  Whether to return payload
+</ParamField>
+
+<ParamField body="with_vector" type="boolean | array">
+  Whether to return vectors
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="array">
+  Array of scored points with id, score, payload, and vector
+</ResponseField>
+
+## Recommend Batch
+
+Perform multiple recommendation queries in a single request.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/recommend/batch' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "searches": [
+      {
+        "positive": [1, 2],
+        "limit": 3
+      },
+      {
+        "positive": [5, 6],
+        "negative": [3],
+        "limit": 5
+      }
+    ]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="searches" type="array" required>
+  Array of recommendation requests
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="array">
+  Array of result arrays, one for each recommendation query
+</ResponseField>
+
+## Recommend Groups
+
+Get recommendations grouped by a payload field.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/recommend/groups' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "positive": [1, 2],
+    "group_by": "category",
+    "limit": 3,
+    "group_size": 2
+  }'
+```
+
+Parameters are similar to search groups, but with positive/negative examples instead of a query vector.
+
+## Query Points
+
+Unified query API that supports multiple query types including nearest neighbors, discovery, and context-based search.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/query' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": [0.2, 0.1, 0.9, 0.7],
+    "limit": 10
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="query" type="array | object" required>
+  Query specification. Can be:
+  - Dense vector array for nearest neighbor search
+  - Object with `nearest` for vector search
+  - Object with `recommend` for recommendation
+  - Object with `discover` for discovery search
+  - Object with `context` for context-based search
+  - Object with `order_by` for payload-based ordering
+</ParamField>
+
+<ParamField body="limit" type="integer">
+  Maximum number of results
+</ParamField>
+
+<ParamField body="offset" type="integer">
+  Offset for pagination
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter conditions
+</ParamField>
+
+<ParamField body="score_threshold" type="float">
+  Minimum score threshold
+</ParamField>
+
+<ParamField body="with_payload" type="boolean | array | object">
+  Whether to return payload
+</ParamField>
+
+<ParamField body="with_vector" type="boolean | array">
+  Whether to return vectors
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="points" type="array">
+    Array of scored points
+  </ResponseField>
+</ResponseField>
+
+## Query Batch
+
+Perform multiple query operations in a single request.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/query/batch' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "searches": [
+      {
+        "query": [0.2, 0.1, 0.9, 0.7],
+        "limit": 3
+      },
+      {
+        "query": {"recommend": {"positive": [1, 2]}},
+        "limit": 5
+      }
+    ]
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="searches" type="array" required>
+  Array of query requests
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="array">
+  Array of query results
+</ResponseField>
+
+## Query Groups
+
+Perform query operations with results grouped by a payload field.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/query/groups' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": [0.2, 0.1, 0.9, 0.7],
+    "group_by": "category",
+    "limit": 3,
+    "group_size": 2
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="query" type="array | object" required>
+  Query specification (same as query points)
+</ParamField>
+
+<ParamField body="group_by" type="string" required>
+  Payload field to group by
+</ParamField>
+
+<ParamField body="limit" type="integer" required>
+  Maximum number of groups
+</ParamField>
+
+<ParamField body="group_size" type="integer" required>
+  Maximum points per group
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter conditions
+</ParamField>
+
+<ParamField body="with_payload" type="boolean | array | object">
+  Whether to return payload
+</ParamField>
+
+<ParamField body="with_vector" type="boolean | array">
+  Whether to return vectors
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="groups" type="array">
+    Array of groups with grouped query results
+  </ResponseField>
+</ResponseField>
+
+## Search Matrix (Pairs)
+
+Compute similarity scores between all pairs of points.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/search/matrix/pairs' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "sample": 100,
+    "limit": 10
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Request Body**
+
+<ParamField body="sample" type="integer">
+  Number of points to sample for matrix computation
+</ParamField>
+
+<ParamField body="limit" type="integer">
+  Number of neighbors per point
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter to select points
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="pairs" type="array">
+    Array of point pairs with similarity scores
+  </ResponseField>
+</ResponseField>
+
+## Search Matrix (Offsets)
+
+Compute similarity matrix in offset format.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/search/matrix/offsets' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "sample": 100,
+    "limit": 10
+  }'
+```
+
+Parameters are identical to search matrix pairs, but returns results in a compressed offset format suitable for large matrices.

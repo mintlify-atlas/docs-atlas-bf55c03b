@@ -1,0 +1,485 @@
+---
+title: Recommendation API
+description: Build sophisticated recommendation systems using positive/negative examples, context pairs, and discovery search
+---
+
+Qdrant's Recommendation API enables you to find similar items based on examples rather than explicit vectors. This approach is ideal for "more like this" features, recommendation engines, and exploration interfaces.
+
+## Basic Recommendations
+
+Find items similar to positive examples and dissimilar to negative examples.
+
+### Simple Recommendation Query
+
+```json
+POST /collections/products/points/recommend
+{
+  "positive": [123, 456],
+  "negative": [789],
+  "limit": 10
+}
+```
+
+This finds points similar to items 123 and 456, but dissimilar to item 789.
+
+### Python Example
+
+```python
+from qdrant_client import QdrantClient
+
+client = QdrantClient("localhost", port=6333)
+
+results = client.recommend(
+    collection_name="products",
+    positive=[123, 456],
+    negative=[789],
+    limit=10
+)
+
+for result in results:
+    print(f"ID: {result.id}, Score: {result.score}")
+```
+
+## How Recommendations Work
+
+### Strategy: Best Score (Default)
+
+Finds items that are most similar to ANY positive example and least similar to ALL negative examples.
+
+**Scoring algorithm**:
+1. Calculate similarity to each positive and negative example
+2. Take maximum similarity to positives
+3. Take maximum similarity to negatives
+4. If max_positive > max_negative: return sigmoid(max_positive)
+5. Otherwise: return -sigmoid(max_negative)
+
+From the source code:
+
+```rust
+let max_positive = positive_similarities
+    .max_by(|a, b| a.total_cmp(b))
+    .unwrap_or(ScoreType::NEG_INFINITY);
+
+let max_negative = negative_similarities
+    .max_by(|a, b| a.total_cmp(b))
+    .unwrap_or(ScoreType::NEG_INFINITY);
+
+if max_positive > max_negative {
+    scaled_fast_sigmoid(max_positive)
+} else {
+    -scaled_fast_sigmoid(max_negative)
+}
+```
+
+<Info>
+The sigmoid transformation ensures scores are in a bounded range and positive examples always rank higher than negative ones.
+</Info>
+
+### Strategy: Average Vector
+
+Use `"strategy": "average_vector"` to compute the average of positive examples (minus negatives) and search for similar items:
+
+```json
+POST /collections/products/points/recommend
+{
+  "positive": [123, 456, 789],
+  "negative": [111],
+  "strategy": "average_vector",
+  "limit": 10
+}
+```
+
+**Computation**:
+```
+avg_vector = (sum(positive_vectors) - sum(negative_vectors)) / count(positives)
+```
+
+Then performs standard vector search with the averaged vector.
+
+## Recommendation Strategies
+
+<Tabs>
+  <Tab title="Best Score">
+    **When to use**: Finding items similar to ANY example
+    
+    **Characteristics**:
+    - More diverse results
+    - Good for exploration
+    - Handles heterogeneous examples well
+    
+    ```json
+    {
+      "positive": [1, 2, 3],
+      "strategy": "best_score"
+    }
+    ```
+  </Tab>
+  <Tab title="Average Vector">
+    **When to use**: Finding items in the "center" of examples
+    
+    **Characteristics**:
+    - More focused results
+    - Good for homogeneous examples
+    - Faster than best_score
+    
+    ```json
+    {
+      "positive": [1, 2, 3],
+      "strategy": "average_vector"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Discovery Search
+
+Find items similar to a target, but specifically in the context defined by positive/negative pairs.
+
+### Discovery Query
+
+```json
+POST /collections/products/points/discover
+{
+  "target": 123,
+  "context": [
+    {"positive": 456, "negative": 789},
+    {"positive": 111, "negative": 222}
+  ],
+  "limit": 10
+}
+```
+
+### How Discovery Works
+
+Discovery uses **context pairs** to define a desired direction in vector space:
+
+1. Each context pair defines a "good direction" (from negative toward positive)
+2. Candidates are ranked by:
+   - Similarity to target
+   - Being on the "correct side" of each context pair
+
+**Scoring algorithm**:
+```
+rank = Σ sign(sim(candidate, positive) - sim(candidate, negative))
+score = rank + sigmoid(sim(candidate, target))
+```
+
+From the source code:
+
+```rust
+pub fn score_by(&self, similarity: impl Fn(&T) -> ScoreType) -> ScoreType {
+    let rank = self.rank_by(&similarity);
+    let target_similarity = similarity(&self.target);
+    let sigmoid_similarity = scaled_fast_sigmoid(target_similarity);
+    rank as ScoreType + sigmoid_similarity
+}
+```
+
+### Use Cases for Discovery
+
+<CardGroup cols={2}>
+  <Card title="Analogical Search" icon="arrows-left-right">
+    "Find products like A, but make them more like B and less like C"
+  </Card>
+  <Card title="Style Transfer" icon="wand-magic-sparkles">
+    "Show me shoes similar to this one, but in a more casual style"
+  </Card>
+  <Card title="Semantic Directions" icon="compass">
+    "Find documents similar to this, but more technical and less marketing"
+  </Card>
+  <Card title="Exploration" icon="map">
+    "Navigate from current item toward a desired attribute"
+  </Card>
+</CardGroup>
+
+### Discovery Example
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", port=6333)
+
+# Find products similar to item 100,
+# but more like formal shoes (50) and less like sneakers (75)
+results = client.discover(
+    collection_name="products",
+    target=100,
+    context=[
+        models.ContextExamplePair(positive=50, negative=75)
+    ],
+    limit=10
+)
+```
+
+## Context Search
+
+Find items that satisfy multiple context constraints without a specific target.
+
+### Context Query
+
+```json
+POST /collections/products/points/discover
+{
+  "context": [
+    {"positive": 10, "negative": 20},
+    {"positive": 30, "negative": 40},
+    {"positive": 50, "negative": 60}
+  ],
+  "limit": 10
+}
+```
+
+<Note>
+Context-only search (without target) finds points that best satisfy all context pairs. This is useful for multi-attribute filtering in embedding space.
+</Note>
+
+### Scoring for Context-Only
+
+```rust
+pub fn score_by(&self, similarity: impl Fn(&T) -> ScoreType) -> ScoreType {
+    self.pairs
+        .iter()
+        .map(|pair| pair.loss_by(&similarity))
+        .sum()
+}
+```
+
+Each context pair contributes a loss value based on how well the candidate satisfies that constraint.
+
+## Using Vectors Directly
+
+Provide vectors instead of point IDs:
+
+```json
+POST /collections/products/points/recommend
+{
+  "positive": [
+    [0.1, 0.2, 0.3, ...],
+    [0.4, 0.5, 0.6, ...]
+  ],
+  "negative": [
+    [0.7, 0.8, 0.9, ...]
+  ],
+  "limit": 10
+}
+```
+
+Useful when you have embeddings but no corresponding points in the collection.
+
+## Recommendation with Filters
+
+Combine recommendations with payload filtering:
+
+```json
+POST /collections/products/points/recommend
+{
+  "positive": [123, 456],
+  "negative": [789],
+  "filter": {
+    "must": [
+      {"key": "category", "match": {"value": "electronics"}},
+      {"key": "price", "range": {"lte": 1000}}
+    ]
+  },
+  "limit": 10
+}
+```
+
+### Python with Filters
+
+```python
+results = client.recommend(
+    collection_name="products",
+    positive=[123, 456],
+    negative=[789],
+    query_filter=models.Filter(
+        must=[
+            models.FieldCondition(
+                key="category",
+                match=models.MatchValue(value="electronics")
+            ),
+            models.FieldCondition(
+                key="price",
+                range=models.Range(lte=1000)
+            )
+        ]
+    ),
+    limit=10
+)
+```
+
+## Lookup from Another Collection
+
+Use examples from a different collection:
+
+```json
+POST /collections/products/points/recommend
+{
+  "positive": [123, 456],
+  "negative": [789],
+  "lookup_from": {
+    "collection": "user_preferences",
+    "vector": "preference_vector"
+  },
+  "limit": 10
+}
+```
+
+This searches in `products` collection using vectors from `user_preferences` collection.
+
+## Advanced Techniques
+
+### Multi-Vector Recommendations
+
+When using named vectors, specify which to use:
+
+```json
+POST /collections/products/points/recommend
+{
+  "positive": [123, 456],
+  "using": "image_vector",
+  "limit": 10
+}
+```
+
+### Batch Recommendations
+
+Recommend for multiple queries at once:
+
+```json
+POST /collections/products/points/recommend/batch
+{
+  "searches": [
+    {
+      "positive": [123],
+      "limit": 5
+    },
+    {
+      "positive": [456, 789],
+      "limit": 5
+    }
+  ]
+}
+```
+
+### Score Threshold
+
+Only return results above a score threshold:
+
+```json
+POST /collections/products/points/recommend
+{
+  "positive": [123, 456],
+  "score_threshold": 0.7,
+  "limit": 10
+}
+```
+
+## Real-World Examples
+
+### E-commerce: Similar Products
+
+```python
+def get_similar_products(product_id, exclude_category=None):
+    filters = models.Filter(
+        must_not=[
+            models.FieldCondition(
+                key="category",
+                match=models.MatchValue(value=exclude_category)
+            )
+        ]
+    ) if exclude_category else None
+    
+    return client.recommend(
+        collection_name="products",
+        positive=[product_id],
+        query_filter=filters,
+        limit=10
+    )
+```
+
+### Content Platform: Personalized Feed
+
+```python
+def personalized_recommendations(liked_items, disliked_items, user_id):
+    # Get recommendations based on user history
+    recommendations = client.recommend(
+        collection_name="content",
+        positive=liked_items,
+        negative=disliked_items,
+        query_filter=models.Filter(
+            must_not=[
+                # Don't recommend already seen content
+                models.HasIdCondition(has_id=liked_items + disliked_items)
+            ]
+        ),
+        limit=50,
+        strategy="average_vector"
+    )
+    return recommendations
+```
+
+### Music Discovery
+
+```python
+def discover_similar_artists(current_artist, liked_genre, disliked_genre):
+    # Find artists similar to current, but shifting toward liked genre
+    return client.discover(
+        collection_name="artists",
+        target=current_artist,
+        context=[
+            models.ContextExamplePair(
+                positive=liked_genre,
+                negative=disliked_genre
+            )
+        ],
+        limit=10
+    )
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choose the Right Strategy">
+    - **Best Score**: When examples are diverse or you want exploration
+    - **Average Vector**: When examples are homogeneous or you want focused results
+  </Accordion>
+  
+  <Accordion title="Balance Positive and Negative Examples">
+    Too many negatives can overly constrain results. Generally use 3-5 positives and 1-2 negatives.
+  </Accordion>
+  
+  <Accordion title="Use Filters Wisely">
+    Combine recommendations with business rules via filters:
+    - Stock availability
+    - Price ranges
+    - Content ratings
+    - Geographic restrictions
+  </Accordion>
+  
+  <Accordion title="Handle Cold Start">
+    For new users without history:
+    - Use popular items as initial positives
+    - Leverage demographic or context data
+    - Fall back to trending/featured items
+  </Accordion>
+  
+  <Accordion title="Monitor Score Distributions">
+    Track recommendation scores to ensure quality:
+    - Low scores may indicate poor examples
+    - Consistent scores suggest insufficient diversity
+  </Accordion>
+</AccordionGroup>
+
+## Performance Considerations
+
+- Recommendations are slightly slower than direct vector search (need to fetch example vectors first)
+- Use `average_vector` strategy for better performance with many examples
+- Batch recommendation requests when possible
+- Consider caching recommendations for popular items
+
+## Related Topics
+
+- [Search API](/search) - Basic vector search capabilities
+- [Filtering](/filtering) - Combine recommendations with payload filters
+- [Named Vectors](/vectors/named-vectors) - Use different vector spaces for recommendations

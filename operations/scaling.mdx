@@ -1,0 +1,528 @@
+---
+title: Scaling
+description: Horizontal scaling, cluster management, shard migration, and zero-downtime updates in Qdrant
+---
+
+## Horizontal Scaling
+
+Qdrant supports horizontal scaling through distributed deployment with multiple nodes and sharding.
+
+### Cluster Architecture
+
+A Qdrant cluster consists of:
+
+- **Peers** - Individual Qdrant nodes in the cluster
+- **Shards** - Partitions of collection data distributed across peers
+- **Replicas** - Copies of shards for high availability
+- **Consensus** - Raft-based consensus for cluster coordination
+
+### Enabling Cluster Mode
+
+Configure cluster mode in `config/config.yaml`:
+
+```yaml config/config.yaml
+cluster:
+  enabled: true
+  
+  # P2P communication
+  p2p:
+    port: 6335
+    enable_tls: false
+    
+  # Consensus configuration
+  consensus:
+    tick_period_ms: 100
+    compact_wal_entries: 128
+```
+
+### Peer ID Assignment
+
+Each node needs a unique peer ID:
+
+```yaml config/config.yaml
+cluster:
+  peer_id: 1  # Must be unique, range: 1 to 9007199254740991
+```
+
+Or use environment variable:
+```bash
+QDRANT__CLUSTER__PEER_ID=1 ./qdrant
+```
+
+## Adding Nodes to Cluster
+
+### Bootstrapping a Cluster
+
+Start the first node with bootstrap flag:
+
+```bash
+./qdrant --bootstrap
+```
+
+This initializes the cluster with a single node.
+
+### Adding Additional Nodes
+
+Start subsequent nodes and point them to an existing peer:
+
+```bash
+./qdrant --uri http://existing-peer:6335
+```
+
+The new node will:
+1. Connect to the existing cluster
+2. Sync cluster metadata
+3. Join the consensus group
+4. Become available for shard placement
+
+### Verifying Cluster State
+
+```bash
+curl http://localhost:6333/cluster
+```
+
+Response:
+```json
+{
+  "result": {
+    "status": "enabled",
+    "peer_id": 1,
+    "peers": {
+      "1": {"uri": "http://node1:6335"},
+      "2": {"uri": "http://node2:6335"},
+      "3": {"uri": "http://node3:6335"}
+    },
+    "raft_info": {
+      "term": 5,
+      "commit": 123,
+      "pending_operations": 0,
+      "is_voter": true
+    }
+  },
+  "status": "ok"
+}
+```
+
+## Shard Management
+
+### Shard Distribution
+
+Configure default shard distribution for collections:
+
+```yaml config/config.yaml
+storage:
+  collection:
+    replication_factor: 3
+    write_consistency_factor: 2
+```
+
+- **replication_factor** - Number of shard replicas
+- **write_consistency_factor** - Replicas confirming writes
+
+### Creating Collections with Sharding
+
+<Tabs>
+  <Tab title="REST API">
+    ```bash
+    curl -X PUT http://localhost:6333/collections/my_collection \
+      -H 'Content-Type: application/json' \
+      -d '{
+        "vectors": {
+          "size": 768,
+          "distance": "Cosine"
+        },
+        "shard_number": 4,
+        "replication_factor": 3
+      }'
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import Distance, VectorParams
+
+    client = QdrantClient("localhost", port=6333)
+
+    client.create_collection(
+        collection_name="my_collection",
+        vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+        shard_number=4,
+        replication_factor=3
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### Viewing Shard Distribution
+
+```bash
+curl http://localhost:6333/collections/my_collection/cluster
+```
+
+Response shows shard placement across peers:
+```json
+{
+  "result": {
+    "peer_id": 1,
+    "shard_count": 4,
+    "local_shards": [
+      {
+        "shard_id": 0,
+        "points_count": 100000,
+        "state": "Active"
+      }
+    ],
+    "remote_shards": [
+      {
+        "shard_id": 1,
+        "peer_id": 2,
+        "state": "Active"
+      }
+    ],
+    "shard_transfers": []
+  }
+}
+```
+
+## Shard Migration
+
+Move shards between nodes to balance load or scale up/down.
+
+### Initiating Shard Transfer
+
+```bash
+curl -X POST http://localhost:6333/collections/my_collection/cluster \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "move_shard": {
+      "shard_id": 0,
+      "from_peer_id": 1,
+      "to_peer_id": 3
+    }
+  }'
+```
+
+### Shard Transfer Methods
+
+Qdrant supports three transfer methods:
+
+1. **stream_records** - Stream points one-by-one
+2. **snapshot** - Transfer via snapshot file
+3. **wal_delta** - Transfer WAL deltas (incremental)
+
+Configure default method:
+
+```yaml config/config.yaml
+storage:
+  shard_transfer_method: wal_delta  # or "stream_records", "snapshot"
+```
+
+Specify per transfer:
+
+```json
+{
+  "move_shard": {
+    "shard_id": 0,
+    "from_peer_id": 1,
+    "to_peer_id": 3,
+    "method": "snapshot"
+  }
+}
+```
+
+### Transfer Rate Limits
+
+Control concurrent transfers:
+
+```yaml config/config.yaml
+storage:
+  performance:
+    incoming_shard_transfers_limit: 1
+    outgoing_shard_transfers_limit: 1
+```
+
+### Monitoring Shard Transfers
+
+View active transfers:
+
+```bash
+curl http://localhost:6333/collections/my_collection/cluster
+```
+
+Check transfer metrics:
+```bash
+curl http://localhost:6333/metrics | grep shard_transfer
+```
+
+Metrics:
+- `collection_shard_transfer_incoming` - Incoming transfers
+- `collection_shard_transfer_outgoing` - Outgoing transfers
+
+### Aborting Shard Transfers
+
+```bash
+curl -X POST http://localhost:6333/collections/my_collection/cluster \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "abort_transfer": {
+      "shard_id": 0,
+      "from_peer_id": 1,
+      "to_peer_id": 3
+    }
+  }'
+```
+
+## Rebalancing
+
+Automatically distribute shards evenly across nodes.
+
+### Manual Rebalancing
+
+Initiate cluster-wide rebalancing:
+
+```bash
+curl -X POST http://localhost:6333/collections/my_collection/cluster \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "replicate_shard": {
+      "shard_id": 0,
+      "from_peer_id": 1,
+      "to_peer_id": 3
+    }
+  }'
+```
+
+### Scaling Strategies
+
+#### Scaling Up (Adding Nodes)
+
+1. Add new node to cluster
+2. Create new shard replicas on the new node:
+   ```bash
+   curl -X POST http://localhost:6333/collections/my_collection/cluster \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "replicate_shard": {
+         "shard_id": 0,
+         "from_peer_id": 1,
+         "to_peer_id": 4
+       }
+     }'
+   ```
+3. Remove old replicas if desired
+
+#### Scaling Down (Removing Nodes)
+
+1. Move shards away from the node:
+   ```bash
+   curl -X POST http://localhost:6333/collections/my_collection/cluster \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "move_shard": {
+         "shard_id": 0,
+         "from_peer_id": 4,
+         "to_peer_id": 1
+       }
+     }'
+   ```
+2. Wait for all transfers to complete
+3. Verify node has no active shards
+4. Remove node from cluster
+
+### Resharding
+
+Change the number of shards in a collection:
+
+```yaml config/config.yaml
+cluster:
+  resharding_enabled: true
+```
+
+This is an experimental feature for dynamically adjusting shard counts.
+
+## Zero-Downtime Updates
+
+### Rolling Updates
+
+Update cluster nodes one at a time:
+
+1. **Prepare** - Ensure cluster is healthy and replicated
+2. **Drain** - Stop sending traffic to one node
+3. **Update** - Upgrade the Qdrant binary
+4. **Restart** - Start the node with new version
+5. **Verify** - Check node rejoined cluster successfully
+6. **Repeat** - Move to next node
+
+### Update Procedure
+
+```bash
+# 1. Check cluster health
+curl http://localhost:6333/cluster
+
+# 2. Update node (example for node 2)
+ssh node2 "systemctl stop qdrant"
+ssh node2 "wget https://github.com/qdrant/qdrant/releases/download/v1.x.x/qdrant"
+ssh node2 "systemctl start qdrant"
+
+# 3. Verify node rejoined
+curl http://localhost:6333/cluster
+
+# 4. Wait for sync
+curl http://localhost:6333/readyz
+
+# Repeat for remaining nodes
+```
+
+### Health Checks During Updates
+
+Use readiness checks:
+
+```bash
+curl http://node:6333/readyz
+```
+
+Returns `200` when node is:
+- Synced with cluster consensus
+- All local shards are healthy
+- Ready to serve traffic
+
+### Consensus Stability
+
+Ensure consensus remains stable:
+
+```yaml config/config.yaml
+cluster:
+  consensus:
+    tick_period_ms: 100
+    bootstrap_timeout_sec: 15
+```
+
+Monitor consensus metrics:
+```bash
+curl http://localhost:6333/metrics | grep cluster
+```
+
+## Load Balancing
+
+### Client-Side Load Balancing
+
+Distribute requests across nodes:
+
+```python
+from qdrant_client import QdrantClient
+
+nodes = [
+    "http://node1:6333",
+    "http://node2:6333",
+    "http://node3:6333"
+]
+
+# Round-robin or random selection
+client = QdrantClient(url=nodes[0])
+```
+
+### Proxy Load Balancing
+
+Use HAProxy, NGINX, or cloud load balancers:
+
+```nginx nginx.conf
+upstream qdrant_cluster {
+    least_conn;
+    server node1:6333;
+    server node2:6333;
+    server node3:6333;
+}
+
+server {
+    listen 80;
+    
+    location / {
+        proxy_pass http://qdrant_cluster;
+        proxy_http_version 1.1;
+    }
+    
+    location /readyz {
+        proxy_pass http://qdrant_cluster;
+        health_check;
+    }
+}
+```
+
+## Performance Considerations
+
+### Shard Sizing
+
+- **Optimal shard size:** 10M-100M points per shard
+- **Too many shards:** Increased overhead, memory usage
+- **Too few shards:** Limited parallelism, uneven distribution
+
+### Replication Trade-offs
+
+- **Higher replication:** Better availability, more storage
+- **Lower replication:** Less redundancy, faster writes
+
+### Network Configuration
+
+Optimize cluster networking:
+
+```yaml config/config.yaml
+cluster:
+  grpc_timeout_ms: 5000
+  connection_timeout_ms: 1000
+  p2p:
+    connection_pool_size: 16
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Plan Shard Count" icon="calculator">
+Calculate shard count based on data volume and node count. Aim for balanced distribution.
+</Card>
+
+<Card title="Use Replication" icon="copy">
+Always use replication_factor >= 3 in production for high availability.
+</Card>
+
+<Card title="Monitor Transfers" icon="gauge">
+Watch shard transfer metrics and logs during migrations to catch issues early.
+</Card>
+
+<Card title="Test Failover" icon="flask">
+Regularly test node failures and automatic recovery to validate cluster resilience.
+</Card>
+
+</CardGroup>
+
+## Troubleshooting
+
+### Node Cannot Join Cluster
+
+Check:
+- Network connectivity between peers
+- Peer ID is unique and in valid range
+- Bootstrap node is reachable
+- Firewall allows port 6335 (p2p)
+
+### Slow Shard Transfers
+
+Optimize:
+- Use `wal_delta` method for incremental transfers
+- Increase network bandwidth
+- Check `outgoing_shard_transfers_limit`
+
+### Split Brain Scenario
+
+If consensus is lost:
+1. Identify the partition with majority of nodes
+2. Restart minority nodes to rejoin
+3. Check network stability
+4. Review consensus configuration
+
+### Uneven Shard Distribution
+
+Rebalance manually:
+- Identify overloaded nodes
+- Move/replicate shards to underutilized nodes
+- Consider resharding for long-term solution

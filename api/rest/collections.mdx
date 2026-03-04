@@ -1,0 +1,409 @@
+---
+title: Collections API
+description: REST API endpoints for managing collections in Qdrant
+---
+
+Collections are the fundamental organizational unit in Qdrant, containing points with vectors and payloads. Use these endpoints to create, manage, and configure collections.
+
+## List Collections
+
+Get a list of all existing collections.
+
+```bash
+curl -X GET 'http://localhost:6333/collections'
+```
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="collections" type="array">
+    List of collection descriptions
+    <ResponseField name="name" type="string">
+      Name of the collection
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+## Get Collection Info
+
+Retrieve detailed information about a specific collection.
+
+```bash
+curl -X GET 'http://localhost:6333/collections/{collection_name}'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to retrieve
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="status" type="string">
+    Status of the collection (green, yellow, red)
+  </ResponseField>
+  <ResponseField name="optimizer_status" type="string">
+    Current optimizer status
+  </ResponseField>
+  <ResponseField name="vectors_count" type="integer">
+    Number of vectors in the collection
+  </ResponseField>
+  <ResponseField name="points_count" type="integer">
+    Number of points in the collection
+  </ResponseField>
+  <ResponseField name="segments_count" type="integer">
+    Number of segments
+  </ResponseField>
+  <ResponseField name="config" type="object">
+    Collection configuration including vector params, distance metric, and replication settings
+  </ResponseField>
+</ResponseField>
+
+## Create Collection
+
+Create a new collection with specified parameters.
+
+```bash
+curl -X PUT 'http://localhost:6333/collections/{collection_name}' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 768,
+      "distance": "Cosine"
+    }
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the new collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="timeout" type="integer">
+  Wait for operation commit timeout in seconds. If timeout is reached, request returns with service error.
+</ParamField>
+
+**Request Body**
+
+<ParamField body="vectors" type="object" required>
+  Vector configuration for the collection
+  
+  <ParamField body="size" type="integer" required>
+    Size of the vectors
+  </ParamField>
+  
+  <ParamField body="distance" type="string" required>
+    Distance metric: `Cosine`, `Euclid`, `Dot`, or `Manhattan`
+  </ParamField>
+  
+  <ParamField body="hnsw_config" type="object">
+    HNSW index configuration
+  </ParamField>
+  
+  <ParamField body="quantization_config" type="object">
+    Vector quantization configuration
+  </ParamField>
+  
+  <ParamField body="on_disk" type="boolean">
+    Store vectors on disk instead of RAM
+  </ParamField>
+</ParamField>
+
+<ParamField body="shard_number" type="integer">
+  Number of shards in collection. Default is 1 for standalone, 2 for clusters.
+</ParamField>
+
+<ParamField body="replication_factor" type="integer">
+  Number of replicas for each shard. Default is 1.
+</ParamField>
+
+<ParamField body="write_consistency_factor" type="integer">
+  Minimum number of replicas that must acknowledge a write operation.
+</ParamField>
+
+<ParamField body="on_disk_payload" type="boolean">
+  Store payload data on disk
+</ParamField>
+
+<ParamField body="optimizers_config" type="object">
+  Configuration for collection optimizers
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if collection was created successfully
+</ResponseField>
+
+## Update Collection
+
+Update parameters of an existing collection.
+
+```bash
+curl -X PATCH 'http://localhost:6333/collections/{collection_name}' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "optimizers_config": {
+      "indexing_threshold": 20000
+    }
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to update
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="timeout" type="integer">
+  Wait for operation commit timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="optimizers_config" type="object">
+  New optimizer configuration
+  
+  <ParamField body="indexing_threshold" type="integer">
+    Minimum number of vectors for indexing to trigger
+  </ParamField>
+  
+  <ParamField body="max_segment_size" type="integer">
+    Maximum segment size in KB
+  </ParamField>
+</ParamField>
+
+<ParamField body="hnsw_config" type="object">
+  HNSW index configuration updates
+</ParamField>
+
+<ParamField body="vectors" type="object">
+  Vector configuration updates
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if collection was updated successfully
+</ResponseField>
+
+## Delete Collection
+
+Delete a collection and all its associated data.
+
+```bash
+curl -X DELETE 'http://localhost:6333/collections/{collection_name}'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to delete
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="timeout" type="integer">
+  Wait for operation commit timeout in seconds
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if collection was deleted successfully
+</ResponseField>
+
+## Check Collection Existence
+
+Check if a collection with the given name exists.
+
+```bash
+curl -X GET 'http://localhost:6333/collections/{collection_name}/exists'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="exists" type="boolean">
+    Returns `true` if collection exists, `false` otherwise
+  </ResponseField>
+</ResponseField>
+
+## Create Field Index
+
+Create an index for a specific field in the collection to enable efficient filtering.
+
+```bash
+curl -X PUT 'http://localhost:6333/collections/{collection_name}/index' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "field_name": "city",
+    "field_schema": "keyword"
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for changes to actually happen. Default is true.
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees: `weak`, `medium`, or `strong`
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="field_name" type="string" required>
+  Name of the field to index
+</ParamField>
+
+<ParamField body="field_schema" type="string" required>
+  Field type: `keyword`, `integer`, `float`, `bool`, `geo`, `datetime`, or `text`
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="operation_id" type="integer">
+    Operation identifier
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    Update status: `acknowledged` or `completed`
+  </ResponseField>
+</ResponseField>
+
+## Delete Field Index
+
+Delete an index for a specific field.
+
+```bash
+curl -X DELETE 'http://localhost:6333/collections/{collection_name}/index/{field_name}'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="field_name" type="string" required>
+  Name of the field where to delete the index
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="wait" type="boolean">
+  If true, wait for changes to actually happen
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees for the operation
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="operation_id" type="integer">
+    Operation identifier
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    Update status
+  </ResponseField>
+</ResponseField>
+
+## Update Collection Aliases
+
+Manage collection aliases for easier collection referencing.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/aliases' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "actions": [
+      {
+        "create_alias": {
+          "collection_name": "my_collection",
+          "alias_name": "production"
+        }
+      }
+    ]
+  }'
+```
+
+**Query Parameters**
+
+<ParamField query="timeout" type="integer">
+  Wait for operation commit timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="actions" type="array" required>
+  List of alias operations to perform
+  
+  <ParamField body="create_alias" type="object">
+    Create a new alias
+    
+    <ParamField body="collection_name" type="string" required>
+      Target collection name
+    </ParamField>
+    
+    <ParamField body="alias_name" type="string" required>
+      New alias name
+    </ParamField>
+  </ParamField>
+  
+  <ParamField body="delete_alias" type="object">
+    Delete an existing alias
+    
+    <ParamField body="alias_name" type="string" required>
+      Alias name to delete
+    </ParamField>
+  </ParamField>
+  
+  <ParamField body="rename_alias" type="object">
+    Rename an existing alias
+    
+    <ParamField body="old_alias_name" type="string" required>
+      Current alias name
+    </ParamField>
+    
+    <ParamField body="new_alias_name" type="string" required>
+      New alias name
+    </ParamField>
+  </ParamField>
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if aliases were updated successfully
+</ResponseField>

@@ -1,0 +1,406 @@
+---
+title: Backup and Restore
+description: Backup strategies and restore procedures for Qdrant data protection and disaster recovery
+---
+
+## Backup Strategies
+
+Qdrant provides multiple approaches to backing up your data:
+
+1. **Full snapshots** - Complete backup of all collections and system state
+2. **Collection snapshots** - Individual collection backups
+3. **Shard snapshots** - Granular backups at the shard level
+
+## Full Snapshots
+
+Full snapshots capture the entire Qdrant instance including all collections and collection aliases.
+
+### Creating a Full Snapshot
+
+<Tabs>
+  <Tab title="REST API">
+    ```bash
+    curl -X POST http://localhost:6333/snapshots
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    from qdrant_client import QdrantClient
+
+    client = QdrantClient("localhost", port=6333)
+    snapshot_info = client.create_full_snapshot()
+    print(snapshot_info.name)
+    ```
+  </Tab>
+</Tabs>
+
+### Asynchronous Creation
+
+For large datasets, create snapshots asynchronously:
+
+```bash
+curl -X POST "http://localhost:6333/snapshots?wait=false"
+```
+
+This returns immediately while the snapshot is created in the background.
+
+### Listing Full Snapshots
+
+```bash
+curl http://localhost:6333/snapshots
+```
+
+Response:
+```json
+{
+  "result": [
+    {
+      "name": "full-snapshot-2024-03-04-12-00-00.snapshot",
+      "creation_time": "2024-03-04T12:00:00Z",
+      "size": 1048576000
+    }
+  ],
+  "status": "ok",
+  "time": 0.001
+}
+```
+
+### Downloading Full Snapshots
+
+```bash
+curl http://localhost:6333/snapshots/{snapshot_name} \
+  --output backup.snapshot
+```
+
+### Snapshot Storage Configuration
+
+Configure snapshot storage location:
+
+```yaml config/config.yaml
+storage:
+  snapshots_path: ./snapshots
+  
+  snapshots_config:
+    snapshots_storage: local  # or "s3"
+    # For S3 storage:
+    # s3_config:
+    #   bucket: "my-qdrant-backups"
+    #   region: "us-east-1"
+    #   access_key: "AKIAIOSFODNN7EXAMPLE"
+    #   secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+```
+
+## Collection Snapshots
+
+Create backups for individual collections.
+
+### Creating a Collection Snapshot
+
+<Tabs>
+  <Tab title="REST API">
+    ```bash
+    curl -X POST http://localhost:6333/collections/{collection_name}/snapshots
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    snapshot_info = client.create_snapshot(
+        collection_name="my_collection"
+    )
+    print(snapshot_info.name)
+    ```
+  </Tab>
+</Tabs>
+
+### Listing Collection Snapshots
+
+```bash
+curl http://localhost:6333/collections/{collection_name}/snapshots
+```
+
+### Downloading Collection Snapshots
+
+```bash
+curl http://localhost:6333/collections/{collection_name}/snapshots/{snapshot_name} \
+  --output collection-backup.snapshot
+```
+
+### Deleting Collection Snapshots
+
+```bash
+curl -X DELETE \
+  http://localhost:6333/collections/{collection_name}/snapshots/{snapshot_name}
+```
+
+## Restore Procedures
+
+### Restoring from Full Snapshot
+
+Restore a complete Qdrant instance from a full snapshot.
+
+#### Using Command Line
+
+Restore during startup:
+
+```bash
+./qdrant --snapshot /path/to/full-snapshot.snapshot
+```
+
+With force option (overwrites existing collections):
+
+```bash
+./qdrant --snapshot /path/to/full-snapshot.snapshot --force-snapshot
+```
+
+<Warning>
+Using `--force-snapshot` will overwrite existing collections and aliases. Use with caution.
+</Warning>
+
+#### Restore Process
+
+The restore process:
+
+1. Unpacks the snapshot to a temporary directory
+2. Reads the snapshot configuration mapping
+3. Restores each collection from its snapshot file
+4. Recreates collection aliases
+5. Removes temporary files
+
+### Restoring from Collection Snapshot
+
+Restore individual collections while Qdrant is running.
+
+#### Upload and Recover
+
+<Tabs>
+  <Tab title="REST API">
+    ```bash
+    # Upload snapshot file
+    curl -X POST \
+      -F "snapshot=@/path/to/collection-backup.snapshot" \
+      http://localhost:6333/collections/{collection_name}/snapshots/upload
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    client.recover_snapshot(
+        collection_name="my_collection",
+        location="http://example.com/snapshot.snapshot"
+    )
+    ```
+  </Tab>
+</Tabs>
+
+#### Recover from URL
+
+Restore from a remote snapshot:
+
+```bash
+curl -X PUT http://localhost:6333/collections/{collection_name}/snapshots/recover \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "location": "http://example.com/snapshots/backup.snapshot"
+  }'
+```
+
+With S3:
+
+```bash
+curl -X PUT http://localhost:6333/collections/{collection_name}/snapshots/recover \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "location": "s3://my-bucket/backup.snapshot",
+    "api_key": "your-s3-access-key"
+  }'
+```
+
+#### Checksum Verification
+
+Verify snapshot integrity during recovery:
+
+```bash
+curl -X POST \
+  -F "snapshot=@backup.snapshot" \
+  "http://localhost:6333/collections/{collection_name}/snapshots/upload?checksum=sha256_hash_here"
+```
+
+The recovery will fail if the checksum doesn't match, preventing corrupted data from being restored.
+
+### Recovery Priority
+
+Control snapshot recovery priority:
+
+```json
+{
+  "location": "http://example.com/snapshot.snapshot",
+  "priority": "snapshot"  // or "replica"
+}
+```
+
+Priority options:
+- `snapshot` - Prefer using the snapshot for recovery
+- `replica` - Prefer using existing replicas
+
+## Data Consistency
+
+### Write-Ahead Log (WAL)
+
+Qdrant uses WAL to ensure data consistency:
+
+```yaml config/config.yaml
+storage:
+  wal:
+    wal_capacity_mb: 32
+    wal_segments_ahead: 0
+```
+
+- **wal_capacity_mb:** Size of each WAL segment
+- **wal_segments_ahead:** Number of segments to pre-allocate
+
+### Snapshot Consistency
+
+Snapshots are consistent at the time of creation:
+
+- **Collection snapshots:** Point-in-time consistency per collection
+- **Full snapshots:** Consistent across all collections at snapshot time
+- **Shard snapshots:** Consistent at shard level
+
+### Replication for High Availability
+
+Combine snapshots with replication:
+
+```yaml config/config.yaml
+storage:
+  collection:
+    replication_factor: 3
+    write_consistency_factor: 2
+```
+
+This ensures:
+- Data is replicated across multiple nodes
+- Writes are confirmed by multiple replicas
+- Snapshots can be taken from any replica
+
+## Backup Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Regular Schedule" icon="clock">
+Automate snapshot creation on a regular schedule using cron or similar tools.
+</Card>
+
+<Card title="Off-Site Storage" icon="cloud">
+Store snapshots in a different location or cloud storage for disaster recovery.
+</Card>
+
+<Card title="Test Restores" icon="flask">
+Regularly test your restore procedures to ensure backups are valid and complete.
+</Card>
+
+<Card title="Monitor Space" icon="hard-drive">
+Ensure sufficient disk space in snapshot directories, especially for large collections.
+</Card>
+
+</CardGroup>
+
+### Automated Backup Script
+
+Example backup automation:
+
+```bash
+#!/bin/bash
+
+# Configuration
+QDRANT_HOST="http://localhost:6333"
+BACKUP_DIR="/backup/qdrant"
+DATE=$(date +%Y-%m-%d-%H-%M-%S)
+RETENTION_DAYS=7
+
+# Create snapshot
+echo "Creating full snapshot..."
+RESPONSE=$(curl -s -X POST "${QDRANT_HOST}/snapshots")
+SNAPSHOT_NAME=$(echo $RESPONSE | jq -r '.result.name')
+
+if [ -z "$SNAPSHOT_NAME" ]; then
+    echo "Failed to create snapshot"
+    exit 1
+fi
+
+echo "Snapshot created: $SNAPSHOT_NAME"
+
+# Download snapshot
+echo "Downloading snapshot..."
+curl -s "${QDRANT_HOST}/snapshots/${SNAPSHOT_NAME}" \
+  -o "${BACKUP_DIR}/${DATE}-${SNAPSHOT_NAME}"
+
+if [ $? -eq 0 ]; then
+    echo "Backup completed: ${DATE}-${SNAPSHOT_NAME}"
+    
+    # Upload to S3 (optional)
+    aws s3 cp "${BACKUP_DIR}/${DATE}-${SNAPSHOT_NAME}" \
+      "s3://my-qdrant-backups/${DATE}-${SNAPSHOT_NAME}"
+else
+    echo "Backup failed"
+    exit 1
+fi
+
+# Cleanup old backups
+find "${BACKUP_DIR}" -name "*.snapshot" -mtime +${RETENTION_DAYS} -delete
+
+echo "Backup process completed"
+```
+
+## Listener Nodes
+
+Dedicated backup nodes can be configured as listeners:
+
+```yaml config/config.yaml
+storage:
+  node_type: "Listener"
+```
+
+Listener nodes:
+- Receive all updates from the cluster
+- Do not serve search or read queries
+- Ideal for dedicated backup operations
+- Reduce load on primary query-serving nodes
+
+## Storage Path Configuration
+
+Configure storage paths:
+
+```yaml config/config.yaml
+storage:
+  storage_path: ./storage
+  snapshots_path: ./snapshots
+  temp_path: null  # Uses storage/snapshots_temp/ if null
+```
+
+<Note>
+Ensure the temp directory has sufficient space for snapshot creation operations.
+</Note>
+
+## Troubleshooting
+
+### Snapshot Creation Fails
+
+Check:
+- Disk space in `snapshots_path`
+- Permissions on snapshot directory
+- Collection state (must be accessible)
+
+### Restore Fails
+
+Verify:
+- Snapshot file is not corrupted (use checksum)
+- Sufficient disk space in `storage_path`
+- Qdrant version compatibility
+- No permission issues
+
+### Slow Snapshot Operations
+
+Optimize by:
+- Using `wait=false` for asynchronous operations
+- Scheduling snapshots during low-traffic periods
+- Increasing `temp_path` to faster storage (SSD)
+- Enabling compression for remote transfers

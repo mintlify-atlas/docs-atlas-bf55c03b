@@ -1,0 +1,755 @@
+---
+title: Installation Guide
+description: Complete guide to installing and deploying Qdrant using Docker, Docker Compose, Kubernetes, from source, or with Qdrant Cloud.
+---
+
+# Installation
+
+Qdrant can be deployed in multiple ways depending on your use case, from local development to production cloud deployments. This guide covers all installation methods.
+
+<Info>
+For production environments, always enable authentication and TLS encryption. See the [security guide](https://qdrant.tech/documentation/guides/security/) for best practices.
+</Info>
+
+## System Requirements
+
+Before installing Qdrant, ensure your system meets these minimum requirements:
+
+### Hardware Requirements
+
+- **CPU**: Modern x86-64 or ARM64 processor (SIMD support recommended)
+- **RAM**: Minimum 2GB (depends on collection size and configuration)
+- **Disk**: SSD recommended for optimal performance (Qdrant uses async I/O)
+- **Network**: Low-latency connection for distributed deployments
+
+### Software Requirements
+
+- **OS**: Linux (recommended), macOS, or Windows with WSL2
+- **Docker**: Version 20.10+ (for container deployments)
+- **Kubernetes**: Version 1.21+ (for K8s deployments)
+- **Rust**: Version 1.92+ (for building from source)
+
+<Tip>
+Qdrant uses **jemalloc** for memory allocation on x86-64 and ARM64 architectures, providing better performance than the system allocator.
+</Tip>
+
+## Docker Installation
+
+Docker is the quickest and most popular way to run Qdrant.
+
+### Basic Docker Setup
+
+<Steps>
+  <Step title="Pull the latest image">
+    ```bash
+    docker pull qdrant/qdrant
+    ```
+  </Step>
+  
+  <Step title="Run with default settings">
+    ```bash
+    docker run -p 6333:6333 qdrant/qdrant
+    ```
+
+    <Warning>
+    This starts an **insecure deployment** without authentication. Never use this configuration in production!
+    </Warning>
+  </Step>
+  
+  <Step title="Access the service">
+    Qdrant is now available at:
+    - REST API: `http://localhost:6333`
+    - Web UI: `http://localhost:6333/dashboard`
+  </Step>
+</Steps>
+
+### Production Docker Setup
+
+For production use, mount volumes for data persistence and provide custom configuration:
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+    -v $(pwd)/qdrant_snapshots:/qdrant/snapshots:z \
+    -v $(pwd)/config/production.yaml:/qdrant/config/production.yaml:z \
+    qdrant/qdrant
+```
+
+<Accordion title="Understanding the configuration">
+**Ports:**
+- `6333`: REST API and Web UI
+- `6334`: gRPC API (optional, for better performance)
+
+**Volumes:**
+- `/qdrant/storage`: All vector data and indexes (must persist!)
+- `/qdrant/snapshots`: Collection backups and snapshots
+- `/qdrant/config/production.yaml`: Custom configuration file
+
+**Security:**
+The `:z` suffix on volumes enables SELinux labeling on RHEL/CentOS systems.
+</Accordion>
+
+### Production Configuration Example
+
+Create `config/production.yaml` with at minimum:
+
+```yaml
+service:
+  # Required: Enable API key authentication
+  api_key: your_secret_api_key_here
+  
+  # Optional: Enable TLS
+  enable_tls: true
+  
+  host: 0.0.0.0
+  http_port: 6333
+  grpc_port: 6334
+
+storage:
+  # Persist data to disk
+  storage_path: ./storage
+  snapshots_path: ./snapshots
+  
+  # Reduce RAM usage by storing payloads on disk
+  on_disk_payload: true
+  
+  # WAL configuration
+  wal:
+    wal_capacity_mb: 32
+    wal_segments_ahead: 0
+```
+
+<Warning>
+Always use **TLS** when enabling API key authentication. Sending API keys over unencrypted channels is insecure.
+</Warning>
+
+### Advanced Docker Options
+
+#### Running as Non-Root User
+
+For enhanced security, run Qdrant with a specific user ID:
+
+```bash
+docker run -p 6333:6333 \
+    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+    -e USER_ID=1000 \
+    qdrant/qdrant
+```
+
+#### GPU Support
+
+Qdrant supports NVIDIA and AMD GPUs for accelerated vector operations:
+
+<CodeGroup>
+```bash NVIDIA GPU
+# Pull GPU-enabled image
+docker pull qdrant/qdrant:latest-gpu-nvidia
+
+# Run with GPU access
+docker run -p 6333:6333 \
+    --gpus all \
+    qdrant/qdrant:latest-gpu-nvidia
+```
+
+```bash AMD GPU
+# Pull GPU-enabled image
+docker pull qdrant/qdrant:latest-gpu-amd
+
+# Run with GPU access
+docker run -p 6333:6333 \
+    --device=/dev/kfd --device=/dev/dri \
+    qdrant/qdrant:latest-gpu-amd
+```
+</CodeGroup>
+
+## Docker Compose
+
+For more complex deployments with multiple services, use Docker Compose.
+
+### Single Node Deployment
+
+Create `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./qdrant_storage:/qdrant/storage:z
+      - ./qdrant_snapshots:/qdrant/snapshots:z
+      - ./config/production.yaml:/qdrant/config/production.yaml:z
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    # Optional: healthcheck
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+```
+
+Start the service:
+
+```bash
+docker-compose up -d
+```
+
+### Distributed Cluster Deployment
+
+For a 3-node cluster with Docker Compose:
+
+```yaml
+version: '3.8'
+
+services:
+  qdrant-node-1:
+    image: qdrant/qdrant:latest
+    container_name: qdrant-node-1
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./qdrant_storage_1:/qdrant/storage:z
+      - ./qdrant_snapshots_1:/qdrant/snapshots:z
+    environment:
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__P2P__PORT=6335
+
+  qdrant-node-2:
+    image: qdrant/qdrant:latest
+    container_name: qdrant-node-2
+    ports:
+      - "6433:6333"
+      - "6434:6334"
+    volumes:
+      - ./qdrant_storage_2:/qdrant/storage:z
+      - ./qdrant_snapshots_2:/qdrant/snapshots:z
+    environment:
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__P2P__PORT=6335
+      - QDRANT__CLUSTER__BOOTSTRAP_URI=http://qdrant-node-1:6335
+    depends_on:
+      - qdrant-node-1
+
+  qdrant-node-3:
+    image: qdrant/qdrant:latest
+    container_name: qdrant-node-3
+    ports:
+      - "6533:6333"
+      - "6534:6334"
+    volumes:
+      - ./qdrant_storage_3:/qdrant/storage:z
+      - ./qdrant_snapshots_3:/qdrant/snapshots:z
+    environment:
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__P2P__PORT=6335
+      - QDRANT__CLUSTER__BOOTSTRAP_URI=http://qdrant-node-1:6335
+    depends_on:
+      - qdrant-node-1
+```
+
+<Info>
+Cluster mode enables horizontal scaling with automatic sharding and replication. The `bootstrap_uri` points to an existing cluster node.
+</Info>
+
+## Kubernetes Deployment
+
+Qdrant provides an official Helm chart for Kubernetes deployments.
+
+### Prerequisites
+
+- Kubernetes cluster (1.21+)
+- Helm 3.x installed
+- kubectl configured
+
+### Install with Helm
+
+<Steps>
+  <Step title="Add Qdrant Helm repository">
+    ```bash
+    helm repo add qdrant https://qdrant.github.io/qdrant-helm
+    helm repo update
+    ```
+  </Step>
+  
+  <Step title="Create a values file">
+    Create `qdrant-values.yaml`:
+
+    ```yaml
+    replicaCount: 3
+    
+    image:
+      repository: qdrant/qdrant
+      tag: latest
+    
+    service:
+      type: LoadBalancer
+      port: 6333
+      grpcPort: 6334
+    
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: "standard"
+    
+    config:
+      cluster:
+        enabled: true
+    
+    resources:
+      requests:
+        memory: "2Gi"
+        cpu: "1000m"
+      limits:
+        memory: "4Gi"
+        cpu: "2000m"
+    
+    # Enable security
+    apiKey: "your-secret-api-key"
+    ```
+  </Step>
+  
+  <Step title="Install Qdrant">
+    ```bash
+    helm install qdrant qdrant/qdrant -f qdrant-values.yaml
+    ```
+  </Step>
+  
+  <Step title="Verify deployment">
+    ```bash
+    kubectl get pods
+    kubectl get svc qdrant
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+The Helm chart automatically configures cluster mode, persistent volumes, and health checks for production readiness.
+</Tip>
+
+### Access Qdrant in Kubernetes
+
+```bash
+# Port forward for local access
+kubectl port-forward svc/qdrant 6333:6333
+
+# Or get the LoadBalancer IP
+kubectl get svc qdrant
+```
+
+## Build from Source
+
+For development or custom builds, compile Qdrant from source.
+
+### Prerequisites
+
+- **Rust**: Version 1.92 or higher
+- **Cargo**: Rust's package manager
+- **Build tools**: clang, cmake, protobuf-compiler
+
+<CodeGroup>
+```bash Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install -y build-essential clang cmake protobuf-compiler libssl-dev pkg-config
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+```
+
+```bash macOS
+# Install Homebrew if not already installed
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install dependencies
+brew install cmake protobuf
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+```bash RHEL/CentOS
+sudo dnf install -y gcc gcc-c++ clang cmake protobuf-compiler openssl-devel
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+</CodeGroup>
+
+### Clone and Build
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/qdrant/qdrant.git
+    cd qdrant
+    ```
+  </Step>
+  
+  <Step title="Build in release mode">
+    ```bash
+    cargo build --release
+    ```
+
+    This will take several minutes. The binary will be at `target/release/qdrant`.
+  </Step>
+  
+  <Step title="Run Qdrant">
+    ```bash
+    ./target/release/qdrant
+    ```
+
+    Qdrant will start with default settings, reading config from `./config/config.yaml`.
+  </Step>
+</Steps>
+
+### Build with Custom Features
+
+```bash
+# Build with GPU support
+cargo build --release --features=gpu
+
+# Build with tracing/profiling support
+cargo build --release --features=tracing
+
+# Build with stacktrace support (Linux only)
+cargo build --release --features=stacktrace
+```
+
+<Accordion title="Available build features">
+- `gpu`: Enable NVIDIA/AMD GPU acceleration
+- `tracing`: Enable distributed tracing support
+- `console`: Enable Tokio console for async debugging
+- `stacktrace`: Enable stack trace collection (Linux only)
+- `service_debug`: Enable parking_lot deadlock detection
+</Accordion>
+
+### Custom Build Options
+
+The Dockerfile shows advanced build options:
+
+```bash
+# Custom target CPU (for optimization)
+export RUSTFLAGS="-C target-cpu=native"
+
+# Use mold linker for faster builds
+export RUSTFLAGS="-C link-arg=-fuse-ld=mold"
+
+# Build with specific profile
+cargo build --profile perf
+```
+
+## Qdrant Cloud
+
+The fastest way to run Qdrant in production without managing infrastructure.
+
+### Features
+
+<CardGroup cols={2}>
+  <Card title="Fully Managed" icon="cloud">
+    Zero ops burden - automatic updates, backups, and scaling
+  </Card>
+  
+  <Card title="High Availability" icon="server">
+    Built-in redundancy and automatic failover
+  </Card>
+  
+  <Card title="Global Deployment" icon="globe">
+    Deploy in multiple regions worldwide
+  </Card>
+  
+  <Card title="Free Tier" icon="gift">
+    Start free with 1GB storage and 1M vectors
+  </Card>
+</CardGroup>
+
+### Getting Started
+
+<Steps>
+  <Step title="Sign up">
+    Visit [cloud.qdrant.io](https://cloud.qdrant.io/) and create an account.
+  </Step>
+  
+  <Step title="Create a cluster">
+    Choose your region, size, and configuration through the web console.
+  </Step>
+  
+  <Step title="Get credentials">
+    Copy your cluster URL and API key from the dashboard.
+  </Step>
+  
+  <Step title="Connect">
+    ```python
+    from qdrant_client import QdrantClient
+
+    client = QdrantClient(
+        url="https://your-cluster.qdrant.io",
+        api_key="your-api-key",
+    )
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+Qdrant Cloud automatically handles TLS, authentication, backups, and monitoring - letting you focus on building applications.
+</Tip>
+
+## Configuration Reference
+
+Qdrant uses YAML configuration files located in the `config/` directory.
+
+### Key Configuration Sections
+
+#### Service Configuration
+
+```yaml
+service:
+  max_request_size_mb: 32
+  max_workers: 0  # 0 = number of CPU cores
+  host: 0.0.0.0
+  http_port: 6333
+  grpc_port: 6334
+  enable_cors: true
+  enable_tls: false
+  
+  # Security (required for production)
+  api_key: your_secret_api_key_here
+  # read_only_api_key: your_read_only_key_here
+  # jwt_rbac: true
+```
+
+#### Storage Configuration
+
+```yaml
+storage:
+  storage_path: ./storage
+  snapshots_path: ./snapshots
+  on_disk_payload: true
+  
+  # WAL settings
+  wal:
+    wal_capacity_mb: 32
+    wal_segments_ahead: 0
+  
+  # Performance tuning
+  performance:
+    max_search_threads: 0
+    optimizer_cpu_budget: 0
+    update_rate_limit: null
+```
+
+#### HNSW Index Configuration
+
+```yaml
+hnsw_index:
+  m: 16                      # Edges per node
+  ef_construct: 100          # Build-time accuracy
+  full_scan_threshold_kb: 10000
+  max_indexing_threads: 0
+  on_disk: false
+```
+
+#### Cluster Configuration
+
+```yaml
+cluster:
+  enabled: false  # Set to true for distributed mode
+  
+  p2p:
+    port: 6335
+    enable_tls: false
+  
+  consensus:
+    tick_period_ms: 100
+    compact_wal_entries: 128
+```
+
+<Info>
+View the complete reference configuration at `config/config.yaml` in the source repository.
+</Info>
+
+## Environment Variables
+
+You can override any configuration value using environment variables:
+
+```bash
+# Format: QDRANT__SECTION__SUBSECTION__KEY=value
+export QDRANT__SERVICE__API_KEY="secret-key"
+export QDRANT__SERVICE__HTTP_PORT=6333
+export QDRANT__CLUSTER__ENABLED=true
+export QDRANT__STORAGE__STORAGE_PATH="./data"
+```
+
+This is particularly useful in containerized environments.
+
+## Ports and Networking
+
+### Default Ports
+
+- **6333**: HTTP REST API and Web UI
+- **6334**: gRPC API (optional, better performance)
+- **6335**: P2P communication (cluster mode only)
+
+### Firewall Configuration
+
+<Accordion title="Production firewall rules">
+**Public-facing:**
+- Allow inbound TCP 6333 (REST API)
+- Allow inbound TCP 6334 (gRPC, optional)
+
+**Cluster communication (private network only):**
+- Allow TCP 6335 between cluster nodes
+
+**Outbound:**
+- Allow HTTPS (443) for license validation and telemetry (optional)
+</Accordion>
+
+## Security Best Practices
+
+<Warning>
+**Never run Qdrant in production without proper security!**
+</Warning>
+
+<Steps>
+  <Step title="Enable authentication">
+    Set `service.api_key` in your configuration file.
+  </Step>
+  
+  <Step title="Enable TLS encryption">
+    ```yaml
+    service:
+      enable_tls: true
+    
+    tls:
+      cert: ./tls/cert.pem
+      key: ./tls/key.pem
+      ca_cert: ./tls/cacert.pem
+      cert_ttl: 3600
+    ```
+  </Step>
+  
+  <Step title="Run as non-root user">
+    Use Docker's `USER_ID` build arg or Kubernetes security contexts.
+  </Step>
+  
+  <Step title="Enable read-only mode">
+    Docker: `--read-only` flag  
+    Kubernetes: `readOnlyRootFilesystem: true`
+  </Step>
+  
+  <Step title="Network isolation">
+    Use private networks for cluster communication. Only expose REST/gRPC ports.
+  </Step>
+</Steps>
+
+## Monitoring and Health Checks
+
+### Health Check Endpoint
+
+```bash
+curl http://localhost:6333/healthz
+```
+
+Returns `200 OK` when Qdrant is healthy.
+
+### Metrics Endpoint
+
+```bash
+curl http://localhost:6333/metrics
+```
+
+Returns Prometheus-compatible metrics.
+
+### Docker Health Check
+
+```bash
+docker run -p 6333:6333 \
+    --health-cmd="curl -f http://localhost:6333/healthz || exit 1" \
+    --health-interval=30s \
+    --health-timeout=10s \
+    --health-retries=3 \
+    qdrant/qdrant
+```
+
+## Troubleshooting
+
+### Common Issues
+
+<Accordion title="Port already in use">
+```bash
+# Check what's using the port
+sudo lsof -i :6333
+
+# Use a different port
+docker run -p 7333:6333 qdrant/qdrant
+```
+</Accordion>
+
+<Accordion title="Permission denied on volumes">
+```bash
+# Fix permissions on mounted directories
+sudo chown -R $(id -u):$(id -g) ./qdrant_storage
+
+# Or use :z flag for SELinux
+docker run -v ./qdrant_storage:/qdrant/storage:z qdrant/qdrant
+```
+</Accordion>
+
+<Accordion title="Out of memory errors">
+Increase RAM or enable memory optimization:
+
+```yaml
+storage:
+  on_disk_payload: true  # Store payloads on disk
+  
+collection:
+  vectors:
+    on_disk: true  # Store vectors on disk
+  
+  quantization:
+    scalar:
+      type: int8  # Use quantization to reduce memory
+```
+</Accordion>
+
+### Logging
+
+View logs with Docker:
+
+```bash
+docker logs qdrant
+
+# Follow logs
+docker logs -f qdrant
+
+# Last 100 lines
+docker logs --tail 100 qdrant
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get started with your first collection and search
+  </Card>
+  
+  <Card title="Configuration Guide" icon="gear">
+    Deep dive into all configuration options
+  </Card>
+  
+  <Card title="Security Guide" icon="shield" href="https://qdrant.tech/documentation/guides/security/">
+    Production security hardening
+  </Card>
+  
+  <Card title="Performance Tuning" icon="gauge-high">
+    Optimize for your specific use case
+  </Card>
+</CardGroup>

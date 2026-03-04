@@ -1,0 +1,605 @@
+---
+title: Payloads
+description: Understanding payloads in Qdrant - JSON metadata for filtering, retrieval, and enriching vector search results
+---
+
+Payloads are JSON objects attached to points that store metadata alongside vectors. They enable filtering, sorting, and enriching search results with structured data.
+
+## What are Payloads?
+
+Each point in Qdrant can have an optional payload containing arbitrary JSON data:
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", port=6333)
+
+client.upsert(
+    collection_name="products",
+    points=[
+        models.PointStruct(
+            id=1,
+            vector=[0.1, 0.2, 0.3, 0.4],
+            payload={
+                "name": "Laptop",
+                "price": 1299.99,
+                "category": "electronics",
+                "in_stock": True,
+                "tags": ["computer", "portable", "work"],
+                "specs": {
+                    "ram": "16GB",
+                    "storage": "512GB SSD"
+                },
+                "release_date": "2024-01-15T00:00:00Z"
+            }
+        )
+    ]
+)
+```
+
+```rust
+// From lib/segment/src/types.rs:1888-1890
+pub struct Payload(pub Map<String, Value>);
+```
+
+<Info>
+Payloads are stored separately from vectors, making them efficient for filtering without loading vector data.
+</Info>
+
+## Supported Data Types
+
+Qdrant payloads support rich JSON data types:
+
+### Primitive Types
+
+```python
+payload = {
+    # String
+    "title": "Vector Database Guide",
+    "author": "Jane Smith",
+    
+    # Integer (i64)
+    "views": 1500,
+    "year": 2024,
+    
+    # Float (f64)
+    "rating": 4.7,
+    "price": 29.99,
+    
+    # Boolean
+    "published": True,
+    "featured": False
+}
+```
+
+```rust
+// From lib/segment/src/types.rs:2029-2042
+pub enum PayloadSchemaType {
+    Keyword,   // String values
+    Integer,   // i64 integers
+    Float,     // f64 floats
+    Geo,       // Geographic points
+    Text,      // Full-text searchable strings
+    Bool,      // Boolean values
+    Datetime,  // RFC3339 datetime strings
+    Uuid,      // UUID identifiers
+}
+```
+
+### Arrays
+
+Store multiple values of the same type:
+
+```python
+payload = {
+    "tags": ["machine-learning", "nlp", "vectors"],
+    "scores": [0.8, 0.9, 0.75, 0.85],
+    "ids": [101, 102, 103]
+}
+```
+
+### Nested Objects
+
+Hierarchical data structures:
+
+```python
+payload = {
+    "product": {
+        "name": "Smartphone",
+        "manufacturer": {
+            "name": "TechCorp",
+            "country": "USA"
+        },
+        "specs": {
+            "screen_size": 6.1,
+            "battery": "4000mAh"
+        }
+    }
+}
+
+# Access nested fields with dot notation
+client.scroll(
+    collection_name="products",
+    scroll_filter=models.Filter(
+        must=[
+            models.FieldCondition(
+                key="product.manufacturer.country",
+                match=models.MatchValue(value="USA")
+            )
+        ]
+    )
+)
+```
+
+### Geographic Points
+
+Latitude and longitude coordinates:
+
+```python
+payload = {
+    "location": {
+        "lon": -0.1276,
+        "lat": 51.5074
+    },
+    "city": "London"
+}
+```
+
+```rust
+// From lib/segment/src/types.rs:1762-1766
+pub struct GeoPoint {
+    pub lon: OrderedFloat<f64>,  // -180 to 180
+    pub lat: OrderedFloat<f64>,  // -90 to 90
+}
+```
+
+<Tip>
+Geo points enable radius and bounding box searches for location-based applications.
+</Tip>
+
+### Datetime Values
+
+RFC3339 formatted datetime strings:
+
+```python
+payload = {
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-03-20T15:45:30Z",
+    "published_date": "2024-02-01T00:00:00Z"
+}
+
+# Filter by date range
+client.scroll(
+    collection_name="articles",
+    scroll_filter=models.Filter(
+        must=[
+            models.FieldCondition(
+                key="created_at",
+                range=models.DatetimeRange(
+                    gte="2024-01-01T00:00:00Z",
+                    lt="2024-04-01T00:00:00Z"
+                )
+            )
+        ]
+    )
+)
+```
+
+<Info>
+Qdrant stores datetimes as microsecond timestamps internally for efficient range queries.
+</Info>
+
+### UUID Values
+
+Universally unique identifiers:
+
+```python
+import uuid
+
+payload = {
+    "document_id": str(uuid.uuid4()),
+    "user_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+## Payload Indexing
+
+Indexing payload fields dramatically improves filter performance:
+
+### Creating Payload Indexes
+
+```python
+# Index a keyword field
+client.create_payload_index(
+    collection_name="products",
+    field_name="category",
+    field_schema=models.PayloadSchemaType.KEYWORD
+)
+
+# Index an integer field
+client.create_payload_index(
+    collection_name="products",
+    field_name="price",
+    field_schema=models.PayloadSchemaType.INTEGER
+)
+
+# Index a text field for full-text search
+client.create_payload_index(
+    collection_name="products",
+    field_name="description",
+    field_schema=models.PayloadSchemaType.TEXT
+)
+
+# Index a geo field for location queries
+client.create_payload_index(
+    collection_name="products",
+    field_name="location",
+    field_schema=models.PayloadSchemaType.GEO
+)
+```
+
+```rust
+// From lib/segment/src/types.rs:429-437
+pub struct PayloadIndexInfo {
+    pub data_type: PayloadSchemaType,
+    pub params: Option<PayloadSchemaParams>,
+    pub points: usize,  // Number of indexed points
+}
+```
+
+<Warning>
+Always index fields you frequently filter on. Without indexes, filters require scanning all points.
+</Warning>
+
+### Advanced Index Configuration
+
+#### Keyword Indexes
+
+```python
+client.create_payload_index(
+    collection_name="products",
+    field_name="category",
+    field_schema=models.KeywordIndexParams(
+        type="keyword",
+        on_disk=False  # Store in RAM for fastest filtering
+    )
+)
+```
+
+#### Integer Indexes with Range Support
+
+```python
+client.create_payload_index(
+    collection_name="products",
+    field_name="year",
+    field_schema=models.IntegerIndexParams(
+        type="integer",
+        range=True,   # Enable range queries
+        lookup=True   # Enable exact match queries
+    )
+)
+```
+
+#### Text Indexes with Tokenization
+
+```python
+client.create_payload_index(
+    collection_name="articles",
+    field_name="content",
+    field_schema=models.TextIndexParams(
+        type="text",
+        tokenizer="word",           # word, whitespace, multilingual
+        min_token_len=2,
+        max_token_len=20,
+        lowercase=True
+    )
+)
+```
+
+<Tip>
+Text indexes enable full-text search within payloads using match queries.
+</Tip>
+
+## Querying Payloads
+
+### Filtering During Search
+
+```python
+# Search with payload filters
+results = client.search(
+    collection_name="products",
+    query_vector=[0.1, 0.2, 0.3, 0.4],
+    query_filter=models.Filter(
+        must=[
+            models.FieldCondition(
+                key="category",
+                match=models.MatchValue(value="electronics")
+            ),
+            models.FieldCondition(
+                key="price",
+                range=models.Range(lte=1000.0)
+            ),
+            models.FieldCondition(
+                key="in_stock",
+                match=models.MatchValue(value=True)
+            )
+        ]
+    ),
+    limit=10
+)
+```
+
+### Match Conditions
+
+```python
+# Exact match
+models.FieldCondition(
+    key="category",
+    match=models.MatchValue(value="electronics")
+)
+
+# Match any of multiple values
+models.FieldCondition(
+    key="category",
+    match=models.MatchAny(any=["electronics", "computers", "phones"])
+)
+
+# Full-text match
+models.FieldCondition(
+    key="description",
+    match=models.MatchText(text="laptop portable")
+)
+```
+
+### Range Conditions
+
+```python
+# Numeric ranges
+models.FieldCondition(
+    key="price",
+    range=models.Range(
+        gte=100.0,  # Greater than or equal
+        lt=500.0    # Less than
+    )
+)
+
+# Date ranges
+models.FieldCondition(
+    key="created_at",
+    range=models.DatetimeRange(
+        gte="2024-01-01T00:00:00Z",
+        lt="2024-12-31T23:59:59Z"
+    )
+)
+```
+
+### Geographic Queries
+
+```python
+# Radius search
+models.FieldCondition(
+    key="location",
+    geo_radius=models.GeoRadius(
+        center=models.GeoPoint(
+            lon=-0.1276,
+            lat=51.5074
+        ),
+        radius=5000.0  # meters
+    )
+)
+
+# Bounding box search
+models.FieldCondition(
+    key="location",
+    geo_bounding_box=models.GeoBoundingBox(
+        top_left=models.GeoPoint(lon=-0.15, lat=51.52),
+        bottom_right=models.GeoPoint(lon=-0.10, lat=51.48)
+    )
+)
+```
+
+### Nested Field Queries
+
+```python
+# Query nested fields with dot notation
+models.FieldCondition(
+    key="product.specs.ram",
+    match=models.MatchValue(value="16GB")
+)
+```
+
+### Array Queries
+
+```python
+# Match any element in array
+models.FieldCondition(
+    key="tags",
+    match=models.MatchAny(any=["nlp", "ml", "ai"])
+)
+```
+
+## Payload Operations
+
+### Setting Payload
+
+Merge new fields into existing payload:
+
+```python
+client.set_payload(
+    collection_name="products",
+    payload={
+        "updated_at": "2024-03-20T10:30:00Z",
+        "views": 1500
+    },
+    points=[1, 2, 3, 4, 5]
+)
+```
+
+### Overwriting Payload
+
+Replace entire payload:
+
+```python
+client.overwrite_payload(
+    collection_name="products",
+    payload={
+        "name": "New Product",
+        "category": "electronics"
+    },
+    points=[1, 2, 3]
+)
+```
+
+### Deleting Payload Fields
+
+Remove specific keys:
+
+```python
+client.delete_payload(
+    collection_name="products",
+    keys=["old_field", "temporary_data"],
+    points=[1, 2, 3]
+)
+```
+
+### Clearing All Payload
+
+Remove entire payload while keeping vector:
+
+```python
+client.clear_payload(
+    collection_name="products",
+    points_selector=models.PointIdsList(points=[1, 2, 3])
+)
+```
+
+## Payload in Search Results
+
+Control what payload data is returned:
+
+```python
+# Return all payload
+results = client.search(
+    collection_name="products",
+    query_vector=[0.1, 0.2, 0.3],
+    with_payload=True,
+    limit=10
+)
+
+# Return no payload
+results = client.search(
+    collection_name="products",
+    query_vector=[0.1, 0.2, 0.3],
+    with_payload=False,
+    limit=10
+)
+
+# Return specific fields only
+results = client.search(
+    collection_name="products",
+    query_vector=[0.1, 0.2, 0.3],
+    with_payload=models.PayloadSelector(
+        include=["name", "price", "category"]
+    ),
+    limit=10
+)
+
+# Exclude specific fields
+results = client.search(
+    collection_name="products",
+    query_vector=[0.1, 0.2, 0.3],
+    with_payload=models.PayloadSelector(
+        exclude=["large_field", "temporary_data"]
+    ),
+    limit=10
+)
+```
+
+<Tip>
+For better performance, only request the payload fields you actually need.
+</Tip>
+
+## Best Practices
+
+<Accordion title="Index frequently filtered fields">
+  Create indexes for any field you filter on regularly. Indexed filters are orders of magnitude faster than unindexed ones.
+</Accordion>
+
+<Accordion title="Keep payloads reasonably sized">
+  Aim for payloads under 1KB per point. Store large objects (images, documents) externally and reference them in the payload.
+</Accordion>
+
+<Accordion title="Use appropriate data types">
+  Use the correct PayloadSchemaType when creating indexes:
+  - `keyword` for exact match filtering (categories, tags, IDs)
+  - `integer` for numeric exact match and ranges
+  - `text` for full-text search
+  - `geo` for location queries
+</Accordion>
+
+<Accordion title="Normalize your data">
+  Keep payload structure consistent across points. This makes querying easier and reduces storage overhead.
+</Accordion>
+
+<Accordion title="Use nested objects sparingly">
+  Deep nesting can make queries complex. Consider flattening structures when possible.
+</Accordion>
+
+<Accordion title="Return only needed payload fields">
+  Use PayloadSelector to fetch only the fields you need, reducing network transfer and deserialization time.
+</Accordion>
+
+## Performance Considerations
+
+### Memory Usage
+
+```python
+# Store indexes on disk for large collections
+client.create_payload_index(
+    collection_name="large_collection",
+    field_name="category",
+    field_schema=models.KeywordIndexParams(
+        type="keyword",
+        on_disk=True  # Reduce RAM usage
+    )
+)
+```
+
+### Filter Selectivity
+
+<Note>
+Combine multiple filters for better performance. Qdrant optimizes filter execution order based on selectivity.
+</Note>
+
+```python
+# Multiple filters are AND'ed together efficiently
+models.Filter(
+    must=[
+        models.FieldCondition(
+            key="category",
+            match=models.MatchValue(value="electronics")  # High selectivity
+        ),
+        models.FieldCondition(
+            key="price",
+            range=models.Range(lte=1000.0)  # Further narrows results
+        )
+    ]
+)
+```
+
+## Related Concepts
+
+<CardGroup cols={2}>
+  <Card title="Points" icon="circle-dot" href="/concepts/points">
+    Learn how payloads are attached to points
+  </Card>
+  <Card title="Indexing" icon="layer-group" href="/concepts/indexing">
+    Understand how payload indexes work
+  </Card>
+  <Card title="Collections" icon="database" href="/concepts/collections">
+    Learn about collection-level configurations
+  </Card>
+  <Card title="Vectors" icon="chart-network" href="/concepts/vectors">
+    Understand the vector component of points
+  </Card>
+</CardGroup>

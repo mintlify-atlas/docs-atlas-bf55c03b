@@ -1,0 +1,267 @@
+---
+title: API Overview
+description: Learn about Qdrant's REST and gRPC APIs for interacting with the vector database
+---
+
+Qdrant provides two primary API interfaces for interacting with the vector database: a REST API and a gRPC API. Both interfaces provide comprehensive access to all Qdrant features, with gRPC offering higher performance for production workloads.
+
+## REST API
+
+The REST API is the easiest way to get started with Qdrant. It provides a simple HTTP interface with JSON payloads, making it compatible with any programming language or tool that can make HTTP requests.
+
+### Base URL
+
+By default, the REST API is available at:
+
+```
+http://localhost:6333
+```
+
+The base URL format is:
+
+```
+{protocol}://{hostname}:{port}
+```
+
+Where:
+- `protocol`: `http` (default) or `https` (when TLS is enabled)
+- `hostname`: `localhost` (default) or your server hostname
+- `port`: `6333` (default HTTP port)
+
+<Note>
+For production deployments, always use HTTPS with proper authentication. See the [authentication guide](/api/authentication) for details.
+</Note>
+
+### Request Format
+
+All REST API requests use standard HTTP methods:
+
+- `GET` - Retrieve resources
+- `POST` - Create resources or perform searches
+- `PUT` - Update or insert resources
+- `DELETE` - Remove resources
+- `PATCH` - Partially update resources
+
+Request bodies use JSON format with `Content-Type: application/json` header.
+
+**Example request:**
+
+```bash
+curl -X POST 'http://localhost:6333/collections/my_collection/points/search' \
+  -H 'Content-Type: application/json' \
+  --data-raw '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "limit": 3
+  }'
+```
+
+### Response Format
+
+All REST API responses return JSON with a consistent structure:
+
+```json
+{
+  "result": { /* response data */ },
+  "status": "ok",
+  "time": 0.000123
+}
+```
+
+Where:
+- `result`: The actual response data (varies by endpoint)
+- `status`: Either `"ok"` for success or contains error information
+- `time`: Request processing time in seconds
+
+**Error response:**
+
+```json
+{
+  "status": {
+    "error": "Collection not found"
+  },
+  "time": 0.000045,
+  "result": null
+}
+```
+
+### Query Parameters
+
+Many endpoints support common query parameters:
+
+- `consistency` - Define read consistency guarantees (see [distributed deployment](/deployment/distributed))
+- `timeout` - Override global timeout for the request (in seconds, minimum 1)
+- `wait` - Wait for operation to complete before returning (`true` or `false`)
+
+**Example with query parameters:**
+
+```bash
+curl 'http://localhost:6333/collections/my_collection?timeout=30'
+```
+
+## gRPC API
+
+The gRPC API provides a high-performance alternative to REST, ideal for production workloads requiring low latency and high throughput.
+
+### Base URL
+
+By default, the gRPC API is available at:
+
+```
+http://localhost:6334
+```
+
+The gRPC port is `6334` by default. You can configure this in your `config.yaml`:
+
+```yaml
+service:
+  grpc_port: 6334  # Set to null to disable gRPC
+```
+
+<Note>
+gRPC is optional and can be disabled by commenting out or setting `grpc_port: null` in the configuration.
+</Note>
+
+### Performance Benefits
+
+gRPC offers several advantages over REST:
+
+- **Binary protocol** - More efficient than JSON for large payloads
+- **HTTP/2 multiplexing** - Multiple concurrent requests over a single connection
+- **Streaming support** - Efficient for batch operations
+- **Lower latency** - Reduced serialization overhead
+
+### Protocol Buffers
+
+The gRPC API is defined using Protocol Buffers. You can find the `.proto` definitions in the Qdrant repository:
+
+- [qdrant.proto](https://github.com/qdrant/qdrant/blob/master/lib/api/src/grpc/proto/qdrant.proto) - Main service definition
+- [collections.proto](https://github.com/qdrant/qdrant/blob/master/lib/api/src/grpc/proto/collections.proto) - Collections operations
+- [points.proto](https://github.com/qdrant/qdrant/blob/master/lib/api/src/grpc/proto/points.proto) - Points operations
+
+### Using gRPC
+
+Most Qdrant client libraries support both REST and gRPC:
+
+<CodeGroup>
+```python Python
+from qdrant_client import QdrantClient
+
+# Use gRPC (recommended for production)
+client = QdrantClient(
+    host="localhost",
+    grpc_port=6334,
+    prefer_grpc=True
+)
+```
+
+```javascript JavaScript
+import { QdrantClient } from '@qdrant/js-client-grpc';
+
+const client = new QdrantClient({
+  host: 'localhost',
+  port: 6334
+});
+```
+
+```rust Rust
+use qdrant_client::client::QdrantClient;
+
+let client = QdrantClient::from_url("http://localhost:6334")
+    .build()
+    .await?;
+```
+</CodeGroup>
+
+## API Versioning
+
+Qdrant follows semantic versioning. The API version is tied to the Qdrant version you're running:
+
+- **Major version changes** may include breaking API changes
+- **Minor version changes** add new features while maintaining backward compatibility
+- **Patch version changes** contain bug fixes and non-breaking improvements
+
+You can check your Qdrant version via the root endpoint:
+
+```bash
+curl http://localhost:6333/
+```
+
+**Response:**
+
+```json
+{
+  "title": "qdrant - vector search engine",
+  "version": "1.8.0"
+}
+```
+
+<Tip>
+Always test your application against a new version in a staging environment before upgrading production.
+</Tip>
+
+## OpenAPI Specification
+
+Qdrant provides a complete OpenAPI 3.0 specification for the REST API:
+
+- **Interactive documentation**: [https://api.qdrant.tech/](https://api.qdrant.tech/)
+- **OpenAPI JSON**: [Download specification](https://github.com/qdrant/qdrant/blob/master/docs/redoc/master/openapi.json)
+
+The OpenAPI specification can be used to:
+
+- Generate client libraries for any language
+- Import into API testing tools (Postman, Insomnia, etc.)
+- Validate request and response schemas
+- Generate documentation automatically
+
+## Health Check Endpoints
+
+Qdrant provides several health check endpoints, useful for monitoring and orchestration:
+
+### Root Endpoint
+
+```bash
+curl http://localhost:6333/
+```
+
+Returns Qdrant version information.
+
+### Kubernetes Health Checks
+
+Qdrant provides dedicated endpoints for Kubernetes:
+
+- `/healthz` - General health check
+- `/livez` - Liveness probe (checks if the service is running)
+- `/readyz` - Readiness probe (checks if the service can accept traffic)
+
+**Example:**
+
+```bash
+curl http://localhost:6333/readyz
+```
+
+**Response:**
+
+```
+healthz check passed
+```
+
+<Card title="Next: Authentication" icon="lock" href="/api/authentication">
+  Learn how to secure your Qdrant instance with API keys and TLS certificates
+</Card>
+
+## Additional Resources
+
+<CardGroup cols={2}>
+  <Card title="Collections API" icon="database" href="/api/rest/collections">
+    Create and manage collections
+  </Card>
+  <Card title="Points API" icon="location-dot" href="/api/rest/points">
+    Insert, update, and delete vectors
+  </Card>
+  <Card title="Search API" icon="magnifying-glass" href="/api/rest/search">
+    Perform vector similarity searches
+  </Card>
+  <Card title="Client Libraries" icon="code" href="/api/clients/python">
+    Use official client SDKs
+  </Card>
+</CardGroup>

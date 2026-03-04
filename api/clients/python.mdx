@@ -1,0 +1,729 @@
+---
+title: Python Client
+description: Official Python client for Qdrant with full async support, type hints, and high-performance gRPC interface
+---
+
+## Installation
+
+Install via pip:
+
+```bash
+pip install qdrant-client
+```
+
+With additional features:
+
+```bash
+# Install with FastEmbed for built-in embeddings
+pip install qdrant-client[fastembed]
+
+# Install with Sentence Transformers support
+pip install qdrant-client[transformers]
+```
+
+## Quick Start
+
+```python
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+
+# Connect to Qdrant
+client = QdrantClient("localhost", port=6333)
+
+# Or use in-memory mode for testing
+client = QdrantClient(":memory:")
+
+# Create collection
+client.create_collection(
+    collection_name="my_collection",
+    vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+)
+
+# Upsert points
+client.upsert(
+    collection_name="my_collection",
+    points=[
+        PointStruct(
+            id=1,
+            vector=[0.05, 0.61, 0.76, 0.74],
+            payload={"city": "Berlin", "country": "Germany"},
+        ),
+        PointStruct(
+            id=2,
+            vector=[0.19, 0.81, 0.75, 0.11],
+            payload={"city": "London", "country": "UK"},
+        ),
+    ],
+)
+
+# Search
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    limit=3,
+)
+
+for result in results:
+    print(result.id, result.score, result.payload)
+```
+
+## Repository
+
+<Card title="GitHub Repository" icon="github" href="https://github.com/qdrant/qdrant-client">
+  Official Python client: `qdrant/qdrant-client`
+</Card>
+
+## Connection Options
+
+### Local Connection
+
+```python
+from qdrant_client import QdrantClient
+
+# HTTP connection (default port 6333)
+client = QdrantClient(host="localhost", port=6333)
+
+# gRPC connection (default port 6334, 30-50% faster)
+client = QdrantClient(
+    host="localhost",
+    grpc_port=6334,
+    prefer_grpc=True
+)
+```
+
+### Cloud Connection
+
+```python
+from qdrant_client import QdrantClient
+
+client = QdrantClient(
+    url="https://your-cluster.cloud.qdrant.io",
+    api_key="your-api-key",
+    prefer_grpc=True  # Use gRPC for better performance
+)
+```
+
+### In-Memory Mode
+
+```python
+from qdrant_client import QdrantClient
+
+# Perfect for testing and development
+client = QdrantClient(":memory:")
+```
+
+### Persistent Local Storage
+
+```python
+from qdrant_client import QdrantClient
+
+# Store data in local directory
+client = QdrantClient(path="./qdrant_storage")
+```
+
+## Async Client
+
+The async client provides the same API with async/await support:
+
+```python
+import asyncio
+from qdrant_client import AsyncQdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+
+async def main():
+    client = AsyncQdrantClient(host="localhost", port=6333)
+    
+    # Create collection
+    await client.create_collection(
+        collection_name="async_collection",
+        vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+    )
+    
+    # Upsert points
+    await client.upsert(
+        collection_name="async_collection",
+        points=[
+            PointStruct(
+                id=1,
+                vector=[0.05, 0.61, 0.76, 0.74],
+                payload={"name": "Document 1"},
+            )
+        ],
+    )
+    
+    # Search
+    results = await client.search(
+        collection_name="async_collection",
+        query_vector=[0.2, 0.1, 0.9, 0.7],
+        limit=5,
+    )
+    
+    await client.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Collection Management
+
+### Create Collection
+
+```python
+from qdrant_client.models import Distance, VectorParams
+
+client.create_collection(
+    collection_name="my_collection",
+    vectors_config=VectorParams(
+        size=768,
+        distance=Distance.COSINE,
+        on_disk=False  # Keep vectors in RAM for speed
+    ),
+)
+```
+
+### Create with Multiple Vectors
+
+```python
+from qdrant_client.models import Distance, VectorParams
+
+client.create_collection(
+    collection_name="multi_vector",
+    vectors_config={
+        "text": VectorParams(size=768, distance=Distance.COSINE),
+        "image": VectorParams(size=512, distance=Distance.DOT),
+    },
+)
+```
+
+### Get Collection Info
+
+```python
+info = client.get_collection(collection_name="my_collection")
+print(f"Vectors count: {info.vectors_count}")
+print(f"Points count: {info.points_count}")
+print(f"Status: {info.status}")
+```
+
+### List Collections
+
+```python
+collections = client.get_collections()
+for collection in collections.collections:
+    print(collection.name)
+```
+
+### Update Collection
+
+```python
+from qdrant_client.models import OptimizersConfigDiff
+
+client.update_collection(
+    collection_name="my_collection",
+    optimizers_config=OptimizersConfigDiff(
+        indexing_threshold=50000,
+        memmap_threshold=100000
+    ),
+)
+```
+
+### Delete Collection
+
+```python
+client.delete_collection(collection_name="my_collection")
+```
+
+## Point Operations
+
+### Upsert Points
+
+```python
+from qdrant_client.models import PointStruct
+import uuid
+
+client.upsert(
+    collection_name="my_collection",
+    points=[
+        PointStruct(
+            id=str(uuid.uuid4()),  # Can use UUID strings
+            vector=[0.05, 0.61, 0.76, 0.74],
+            payload={
+                "title": "Document 1",
+                "category": "technology",
+                "views": 1500,
+                "tags": ["ai", "ml", "vector-db"]
+            },
+        ),
+        PointStruct(
+            id=2,  # Or integers
+            vector=[0.19, 0.81, 0.75, 0.11],
+            payload={"title": "Document 2"},
+        ),
+    ],
+    wait=True  # Wait for operation to complete
+)
+```
+
+### Upload Points (Optimized for Large Batches)
+
+```python
+import numpy as np
+from qdrant_client.models import PointStruct
+
+# Generate 100k random vectors
+vectors = np.random.rand(100000, 384).tolist()
+
+client.upload_points(
+    collection_name="my_collection",
+    points=[
+        PointStruct(id=idx, vector=vector)
+        for idx, vector in enumerate(vectors)
+    ],
+    batch_size=100,  # Upload in batches
+    parallel=4,  # Use 4 parallel workers
+    wait=False  # Don't wait for indexing
+)
+```
+
+### Get Points
+
+```python
+points = client.retrieve(
+    collection_name="my_collection",
+    ids=[1, 2, 3],
+    with_payload=True,
+    with_vectors=True,
+)
+
+for point in points:
+    print(f"ID: {point.id}")
+    print(f"Vector: {point.vector}")
+    print(f"Payload: {point.payload}")
+```
+
+### Delete Points
+
+```python
+from qdrant_client.models import PointIdsList, FilterSelector, Filter, FieldCondition, MatchValue
+
+# Delete by IDs
+client.delete(
+    collection_name="my_collection",
+    points_selector=PointIdsList(points=[1, 2, 3]),
+)
+
+# Delete by filter
+client.delete(
+    collection_name="my_collection",
+    points_selector=FilterSelector(
+        filter=Filter(
+            must=[
+                FieldCondition(
+                    key="category",
+                    match=MatchValue(value="outdated"),
+                )
+            ]
+        )
+    ),
+)
+```
+
+## Search Operations
+
+### Basic Search
+
+```python
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    limit=10,
+    with_payload=True,
+    with_vectors=False,
+)
+
+for scored_point in results:
+    print(scored_point.id, scored_point.score)
+    print(scored_point.payload)
+```
+
+### Search with Filtering
+
+```python
+from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            FieldCondition(
+                key="category",
+                match=MatchValue(value="technology"),
+            ),
+            FieldCondition(
+                key="views",
+                range=Range(gte=1000, lt=10000),
+            ),
+        ]
+    ),
+    limit=5,
+    score_threshold=0.7,
+)
+```
+
+### Search with Custom Params
+
+```python
+from qdrant_client.models import SearchParams
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    limit=10,
+    search_params=SearchParams(
+        hnsw_ef=128,  # Trade recall for speed
+        exact=False,  # Use approximate search
+    ),
+)
+```
+
+### Batch Search
+
+```python
+from qdrant_client.models import SearchRequest
+
+results = client.search_batch(
+    collection_name="my_collection",
+    requests=[
+        SearchRequest(
+            vector=[0.2, 0.1, 0.9, 0.7],
+            limit=5,
+        ),
+        SearchRequest(
+            vector=[0.5, 0.3, 0.2, 0.8],
+            limit=10,
+        ),
+    ],
+)
+
+for batch_results in results:
+    for point in batch_results:
+        print(point.id, point.score)
+```
+
+## Recommendations
+
+### Basic Recommendations
+
+```python
+results = client.recommend(
+    collection_name="my_collection",
+    positive=[1, 2, 3],  # IDs of positive examples
+    negative=[10],       # IDs of negative examples
+    limit=10,
+)
+```
+
+### Recommend with Vectors
+
+```python
+results = client.recommend(
+    collection_name="my_collection",
+    positive=[1, 2],
+    negative=[],
+    strategy="best_score",  # or "average_vector"
+    limit=5,
+    query_filter=Filter(
+        must=[FieldCondition(key="category", match=MatchValue(value="tech"))]
+    ),
+)
+```
+
+## Query API (Universal)
+
+```python
+from qdrant_client.models import Prefetch, Query
+
+# Hybrid search with fusion
+results = client.query_points(
+    collection_name="my_collection",
+    prefetch=[
+        Prefetch(
+            query=[0.1, 0.2, 0.3],
+            using="dense",
+            limit=100,
+        ),
+        Prefetch(
+            query=[0.4, 0.5, 0.6],
+            using="sparse",
+            limit=100,
+        ),
+    ],
+    query=Query(fusion="rrf"),  # Reciprocal Rank Fusion
+    limit=10,
+)
+```
+
+## Payload Operations
+
+### Set Payload
+
+```python
+from qdrant_client.models import PointIdsList
+
+client.set_payload(
+    collection_name="my_collection",
+    payload={"new_field": "value", "updated_at": "2024-01-01"},
+    points=[1, 2, 3],
+)
+```
+
+### Overwrite Payload
+
+```python
+client.overwrite_payload(
+    collection_name="my_collection",
+    payload={"only_field": "value"},
+    points=[1, 2],
+)
+```
+
+### Delete Payload Keys
+
+```python
+client.delete_payload(
+    collection_name="my_collection",
+    keys=["old_field", "deprecated"],
+    points=[1, 2, 3],
+)
+```
+
+### Clear Payload
+
+```python
+client.clear_payload(
+    collection_name="my_collection",
+    points_selector=PointIdsList(points=[1, 2, 3]),
+)
+```
+
+## Scroll (Pagination)
+
+```python
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+offset = None
+all_points = []
+
+while True:
+    points, next_offset = client.scroll(
+        collection_name="my_collection",
+        limit=100,
+        offset=offset,
+        with_payload=True,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="category", match=MatchValue(value="tech"))]
+        ),
+    )
+    
+    all_points.extend(points)
+    offset = next_offset
+    
+    if offset is None:
+        break
+
+print(f"Total points: {len(all_points)}")
+```
+
+## Payload Indexing
+
+```python
+from qdrant_client.models import PayloadSchemaType, TextIndexParams, TokenizerType
+
+# Create keyword index
+client.create_payload_index(
+    collection_name="my_collection",
+    field_name="category",
+    field_schema=PayloadSchemaType.KEYWORD,
+)
+
+# Create text index for full-text search
+client.create_payload_index(
+    collection_name="my_collection",
+    field_name="description",
+    field_schema=PayloadSchemaType.TEXT,
+    field_index_params=TextIndexParams(
+        tokenizer=TokenizerType.WORD,
+        lowercase=True,
+        min_token_len=2,
+        max_token_len=20,
+    ),
+)
+
+# Delete index
+client.delete_payload_index(
+    collection_name="my_collection",
+    field_name="category",
+)
+```
+
+## Snapshots
+
+### Create Snapshot
+
+```python
+snapshot_info = client.create_snapshot(collection_name="my_collection")
+print(f"Snapshot name: {snapshot_info.name}")
+```
+
+### List Snapshots
+
+```python
+snapshots = client.list_snapshots(collection_name="my_collection")
+for snapshot in snapshots:
+    print(snapshot.name)
+```
+
+### Recover from Snapshot
+
+```python
+client.recover_snapshot(
+    collection_name="my_collection",
+    location="http://localhost:6333/snapshots/my_collection/snapshot.snapshot",
+)
+```
+
+## FastEmbed Integration
+
+Automatic embedding generation:
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient(":memory:")
+
+# Create collection
+client.create_collection(
+    collection_name="documents",
+    vectors_config=models.VectorParams(
+        size=384,  # all-MiniLM-L6-v2 dimension
+        distance=models.Distance.COSINE,
+    ),
+)
+
+# Add documents (embeddings generated automatically)
+client.add(
+    collection_name="documents",
+    documents=[
+        "Qdrant is a vector database",
+        "Machine learning is fascinating",
+        "Python is a great programming language",
+    ],
+    metadata=[
+        {"source": "doc1"},
+        {"source": "doc2"},
+        {"source": "doc3"},
+    ],
+)
+
+# Query with text (embedding generated automatically)
+results = client.query(
+    collection_name="documents",
+    query_text="What is Qdrant?",
+    limit=3,
+)
+
+for result in results:
+    print(result.document, result.metadata)
+```
+
+## Type Hints
+
+The Python client is fully typed:
+
+```python
+from typing import List
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    PointStruct,
+    ScoredPoint,
+    CollectionInfo,
+    VectorParams,
+)
+
+def search_documents(
+    client: QdrantClient,
+    collection: str,
+    query: List[float],
+) -> List[ScoredPoint]:
+    results: List[ScoredPoint] = client.search(
+        collection_name=collection,
+        query_vector=query,
+        limit=10,
+    )
+    return results
+```
+
+## Error Handling
+
+```python
+from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
+
+client = QdrantClient("localhost", port=6333)
+
+try:
+    client.get_collection(collection_name="nonexistent")
+except UnexpectedResponse as e:
+    if e.status_code == 404:
+        print("Collection not found")
+    else:
+        print(f"Error: {e.status_code} - {e.reason_phrase}")
+```
+
+## Configuration Options
+
+```python
+from qdrant_client import QdrantClient
+
+client = QdrantClient(
+    url="http://localhost:6333",
+    api_key="your-api-key",
+    timeout=30,  # Request timeout in seconds
+    grpc_port=6334,
+    prefer_grpc=True,  # Use gRPC when available
+    https=True,  # Use HTTPS
+    grpc_options={
+        "grpc.max_send_message_length": 100 * 1024 * 1024,
+        "grpc.max_receive_message_length": 100 * 1024 * 1024,
+    },
+)
+```
+
+## Best Practices
+
+<Tip>
+  **Performance optimization:**
+  - Use `prefer_grpc=True` for 30-50% better performance
+  - Set `wait=False` for async upserts (10x faster)
+  - Use `upload_points()` with parallel workers for bulk uploads
+  - Create payload indexes before filtering on fields
+</Tip>
+
+<Warning>
+  **Common pitfalls:**
+  - Always match vector dimensions with collection config
+  - Use UUID strings or integers for point IDs (not floats)
+  - Close async clients with `await client.close()`
+  - Don't use in-memory mode for production workloads
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="gRPC API" icon="bolt" href="/api/grpc/overview">
+    Learn about the gRPC interface
+  </Card>
+  <Card title="JavaScript Client" icon="js" href="/api/clients/javascript">
+    JavaScript/TypeScript client
+  </Card>
+</CardGroup>

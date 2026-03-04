@@ -1,0 +1,538 @@
+---
+title: Indexing
+description: Understanding indexing in Qdrant - HNSW vector indexes and payload indexes for fast similarity search and filtering
+---
+
+Indexing is crucial for fast vector similarity search at scale. Qdrant uses specialized index structures to efficiently search through millions or billions of vectors.
+
+## Vector Indexing
+
+Qdrant supports two vector index types:
+
+### Plain Index (No Index)
+
+Brute-force search through all vectors:
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", port=6333)
+
+client.create_collection(
+    collection_name="small_collection",
+    vectors_config=models.VectorParams(
+        size=128,
+        distance=models.Distance.COSINE
+    ),
+    # Plain index (default for new segments)
+    hnsw_config=None
+)
+```
+
+```rust
+// From lib/segment/src/types.rs:618-628
+pub enum Indexes {
+    Plain {},  // No index, scan whole collection
+    Hnsw(HnswConfig),  // HNSW approximate search
+}
+```
+
+<Info>
+Plain indexes guarantee 100% precision but are only practical for small collections (less than 10K vectors).
+</Info>
+
+### HNSW Index
+
+Hierarchical Navigable Small World - the default index for fast approximate search:
+
+```python
+client.create_collection(
+    collection_name="large_collection",
+    vectors_config=models.VectorParams(
+        size=384,
+        distance=models.Distance.COSINE
+    ),
+    hnsw_config=models.HnswConfigDiff(
+        m=16,              # Number of edges per node
+        ef_construct=100,  # Construction time/quality trade-off
+        full_scan_threshold=10000  # Switch to brute force below this
+    )
+)
+```
+
+```rust
+// From lib/segment/src/types.rs:647-684
+pub struct HnswConfig {
+    pub m: usize,                      // Edges per node in graph
+    pub ef_construct: usize,           // Build quality parameter
+    pub full_scan_threshold: usize,    // KiloBytes threshold
+    pub max_indexing_threads: usize,   // Parallel indexing threads
+    pub on_disk: Option<bool>,         // Store index on disk
+    pub payload_m: Option<usize>,      // M for payload indexes
+    pub inline_storage: Option<bool>,  // Inline vectors in index
+}
+```
+
+<Tip>
+HNSW provides excellent recall (>95%) at a fraction of the cost of exhaustive search.
+</Tip>
+
+## HNSW Algorithm
+
+HNSW builds a multi-layer graph structure for efficient approximate nearest neighbor search:
+
+### How HNSW Works
+
+1. **Graph Construction**: Vectors are organized into a hierarchical graph with multiple layers
+2. **Entry Point**: Search starts at the top layer with a single entry point
+3. **Greedy Traversal**: At each layer, navigate to the closest neighbor until a local minimum is found
+4. **Descend**: Move down to the next layer and repeat
+5. **Bottom Layer**: Final refinement at the bottom layer with all vectors
+
+### Key Parameters
+
+#### M - Connectivity
+
+Number of bidirectional links per node:
+
+```python
+hnsw_config=models.HnswConfigDiff(
+    m=16  # Default: 16
+)
+```
+
+| M Value | Memory | Build Time | Search Quality | Search Speed |
+|---------|--------|------------|----------------|---------------|
+| **8** | Low | Fast | Good | Fast |
+| **16** | Medium | Medium | Better | Medium |
+| **32** | High | Slow | Best | Slow |
+| **64** | Very High | Very Slow | Excellent | Very Slow |
+
+<Info>
+Higher M means more connections, better quality, but more memory and slower search.
+</Info>
+
+#### ef_construct - Build Quality
+
+Number of candidates evaluated during construction:
+
+```python
+hnsw_config=models.HnswConfigDiff(
+    ef_construct=100  # Default: 100
+)
+```
+
+| ef_construct | Build Time | Search Quality |
+|--------------|------------|-----------------|
+| **50** | Fast | Good |
+| **100** | Medium | Better |
+| **200** | Slow | Best |
+| **500** | Very Slow | Excellent |
+
+<Tip>
+Higher ef_construct improves index quality but increases build time. It does not affect search speed.
+</Tip>
+
+```rust
+// From lib/segment/src/types.rs:1309
+pub const DEFAULT_HNSW_EF_CONSTRUCT: usize = 100;
+```
+
+#### ef - Search Quality
+
+Number of candidates evaluated during search (runtime parameter):
+
+```python
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.1, 0.2, 0.3, ...],
+    limit=10,
+    search_params=models.SearchParams(
+        hnsw_ef=128,  # Default: automatic based on limit
+        exact=False   # Use approximate search
+    )
+)
+```
+
+| hnsw_ef | Search Speed | Recall |
+|---------|--------------|--------|
+| **32** | Fastest | ~90% |
+| **64** | Fast | ~95% |
+| **128** | Medium | ~98% |
+| **256** | Slow | ~99% |
+| **512** | Very Slow | ~99.5% |
+
+<Info>
+Higher hnsw_ef improves recall but slows down search. Adjust per-query based on quality requirements.
+</Info>
+
+#### full_scan_threshold
+
+When to use brute-force instead of HNSW:
+
+```python
+hnsw_config=models.HnswConfigDiff(
+    full_scan_threshold=10000  # KiloBytes (KB)
+)
+```
+
+```rust
+// From lib/segment/src/types.rs:1731
+pub const DEFAULT_FULL_SCAN_THRESHOLD: usize = 10_000;
+```
+
+<Note>
+For queries filtering down to few vectors, brute-force is faster than HNSW graph traversal. This threshold automatically switches strategies.
+</Note>
+
+## Index Storage
+
+### In-Memory HNSW
+
+Fastest option - entire index in RAM:
+
+```python
+hnsw_config=models.HnswConfigDiff(
+    m=16,
+    ef_construct=100,
+    on_disk=False  # Store in RAM
+)
+```
+
+### On-Disk HNSW
+
+Reduces memory usage for large indexes:
+
+```python
+hnsw_config=models.HnswConfigDiff(
+    m=16,
+    ef_construct=100,
+    on_disk=True  # Store on disk with memory-mapping
+)
+```
+
+<Warning>
+On-disk HNSW increases search latency, especially for cold queries. Use for large datasets where memory is limited.
+</Warning>
+
+## Payload Indexing
+
+Payload indexes enable fast filtering:
+
+### Keyword Index
+
+For exact match filtering:
+
+```python
+client.create_payload_index(
+    collection_name="products",
+    field_name="category",
+    field_schema=models.PayloadSchemaType.KEYWORD
+)
+```
+
+Uses a hash map for O(1) lookups:
+```
+category="electronics" -> [point_1, point_5, point_8, ...]
+category="books" -> [point_2, point_3, point_7, ...]
+```
+
+### Integer Index
+
+For numeric exact match and range queries:
+
+```python
+client.create_payload_index(
+    collection_name="products",
+    field_name="price",
+    field_schema=models.IntegerIndexParams(
+        type="integer",
+        range=True,   # Enable range queries
+        lookup=True   # Enable exact match
+    )
+)
+```
+
+Uses a range tree for efficient range queries:
+```
+price < 100 -> [point_1, point_4, point_6, ...]
+price >= 500 -> [point_2, point_9, point_12, ...]
+```
+
+### Text Index
+
+For full-text search:
+
+```python
+client.create_payload_index(
+    collection_name="articles",
+    field_name="content",
+    field_schema=models.TextIndexParams(
+        type="text",
+        tokenizer="word",      # word, whitespace, multilingual
+        min_token_len=2,
+        max_token_len=20,
+        lowercase=True
+    )
+)
+```
+
+Uses an inverted index:
+```
+"vector" -> [doc_1, doc_3, doc_7, ...]
+"database" -> [doc_1, doc_2, doc_5, ...]
+"search" -> [doc_3, doc_5, doc_8, ...]
+```
+
+### Geo Index
+
+For geographic queries:
+
+```python
+client.create_payload_index(
+    collection_name="locations",
+    field_name="coordinates",
+    field_schema=models.PayloadSchemaType.GEO
+)
+```
+
+Uses a spatial index (R-tree) for radius and bounding box queries.
+
+### Bool Index
+
+For boolean filtering:
+
+```python
+client.create_payload_index(
+    collection_name="products",
+    field_name="in_stock",
+    field_schema=models.PayloadSchemaType.BOOL
+)
+```
+
+## Optimization Process
+
+Qdrant automatically optimizes segments over time:
+
+### Segment Types
+
+```rust
+// From lib/segment/src/types.rs:417-426
+pub enum SegmentType {
+    Plain,    // No index, all operations available
+    Indexed,  // With index, optimized for search
+    Special,  // Special purpose segments
+}
+```
+
+### Optimization Strategy
+
+1. **Plain Segments**: New points go into plain (unindexed) segments for fast writes
+2. **Threshold**: When segment reaches threshold size, optimization is triggered
+3. **Index Building**: Optimizer builds HNSW index in background
+4. **Replacement**: Old plain segment is replaced with new indexed segment
+
+```python
+# Configure optimization
+client.update_collection(
+    collection_name="my_collection",
+    optimizer_config=models.OptimizersConfigDiff(
+        indexing_threshold=20000,  # Start indexing at 20K points
+        max_optimization_threads=4
+    )
+)
+```
+
+<Info>
+Optimization runs in the background without blocking reads or writes.
+</Info>
+
+## Quantization
+
+Reduce memory usage with vector quantization:
+
+### Scalar Quantization
+
+Convert float32 to int8:
+
+```python
+client.create_collection(
+    collection_name="compressed",
+    vectors_config=models.VectorParams(
+        size=768,
+        distance=models.Distance.COSINE
+    ),
+    quantization_config=models.ScalarQuantization(
+        scalar=models.ScalarQuantizationConfig(
+            type=models.ScalarType.INT8,
+            quantile=0.99,      # Quantization bounds
+            always_ram=True     # Keep quantized vectors in RAM
+        )
+    )
+)
+```
+
+Memory reduction: **4x** (from float32 to int8)
+
+### Product Quantization
+
+Split vectors into sub-vectors:
+
+```python
+quantization_config=models.ProductQuantization(
+    product=models.ProductQuantizationConfig(
+        compression=models.CompressionRatio.X16,  # 16x compression
+        always_ram=False
+    )
+)
+```
+
+Memory reduction: **4x to 64x** depending on compression ratio
+
+### Binary Quantization
+
+1-bit quantization:
+
+```python
+quantization_config=models.BinaryQuantization(
+    binary=models.BinaryQuantizationConfig(
+        always_ram=True
+    )
+)
+```
+
+Memory reduction: **32x** (from float32 to 1-bit)
+
+<Warning>
+Quantization trades memory for accuracy. Always benchmark with your specific data and queries.
+</Warning>
+
+## Search Optimization
+
+### ACORN Search
+
+Improves recall for filtered searches:
+
+```python
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.1, 0.2, ...],
+    query_filter=models.Filter(...),
+    search_params=models.SearchParams(
+        acorn=models.AcornSearchParams(
+            enable=True,
+            max_selectivity=0.4  # Use ACORN when filters match <40% of points
+        )
+    ),
+    limit=10
+)
+```
+
+<Tip>
+ACORN helps when filters are very selective (match few points). It improves recall at the cost of some performance.
+</Tip>
+
+### Exact Search
+
+Disable approximate search:
+
+```python
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.1, 0.2, ...],
+    search_params=models.SearchParams(
+        exact=True  # Use brute-force for 100% recall
+    ),
+    limit=10
+)
+```
+
+## Performance Tuning
+
+### For High Throughput
+
+```python
+hnsw_config=models.HnswConfigDiff(
+    m=8,              # Lower connectivity
+    ef_construct=64,  # Faster build
+    on_disk=False
+)
+
+search_params=models.SearchParams(
+    hnsw_ef=32  # Faster search, ~90% recall
+)
+```
+
+### For High Accuracy
+
+```python
+hnsw_config=models.HnswConfigDiff(
+    m=32,              # Higher connectivity
+    ef_construct=200,  # Better quality
+    on_disk=False
+)
+
+search_params=models.SearchParams(
+    hnsw_ef=256  # Better recall, ~99%
+)
+```
+
+### For Large Scale
+
+```python
+hnsw_config=models.HnswConfigDiff(
+    m=16,
+    ef_construct=100,
+    on_disk=True  # Save memory
+)
+
+quantization_config=models.ScalarQuantization(
+    scalar=models.ScalarQuantizationConfig(
+        type=models.ScalarType.INT8,
+        quantile=0.99
+    )
+)
+```
+
+## Best Practices
+
+<Accordion title="Index all filtered fields">
+  Create indexes for every payload field you filter on. Unindexed filters are extremely slow.
+</Accordion>
+
+<Accordion title="Balance M and ef_construct">
+  Start with defaults (M=16, ef_construct=100). Increase M for better recall, ef_construct for better index quality.
+</Accordion>
+
+<Accordion title="Tune hnsw_ef per use case">
+  Use lower hnsw_ef (32-64) for latency-critical applications, higher (128-256) for accuracy-critical applications.
+</Accordion>
+
+<Accordion title="Use quantization for large collections">
+  Quantization dramatically reduces memory usage with minimal accuracy loss. Start with scalar quantization.
+</Accordion>
+
+<Accordion title="Monitor optimization status">
+  Check collection status to ensure optimization is completing successfully.
+</Accordion>
+
+<Accordion title="Consider on-disk for large datasets">
+  If your vectors don't fit in RAM, use on-disk HNSW and quantization.
+</Accordion>
+
+## Related Concepts
+
+<CardGroup cols={2}>
+  <Card title="Collections" icon="layer-group" href="/concepts/collections">
+    Learn how to configure indexes at collection creation
+  </Card>
+  <Card title="Vectors" icon="chart-network" href="/concepts/vectors">
+    Understand what gets indexed
+  </Card>
+  <Card title="Payloads" icon="database" href="/concepts/payloads">
+    Learn about payload indexes
+  </Card>
+  <Card title="Distance Metrics" icon="ruler" href="/concepts/distance-metrics">
+    Understand distance calculations in indexed search
+  </Card>
+</CardGroup>

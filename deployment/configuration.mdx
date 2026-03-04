@@ -1,0 +1,678 @@
+---
+title: Configuration Reference
+description: Complete configuration reference for Qdrant including storage, performance, networking, and optimization settings
+---
+
+Qdrant can be configured through YAML configuration files, environment variables, or command-line arguments. This guide covers all available configuration options.
+
+## Configuration Methods
+
+<Tabs>
+  <Tab title="Configuration File">
+    Create a `config/config.yaml` file:
+    
+    ```yaml
+    log_level: INFO
+    
+    storage:
+      storage_path: ./storage
+    
+    service:
+      http_port: 6333
+    ```
+    
+    Qdrant automatically loads `config/config.yaml` from the current directory.
+  </Tab>
+  
+  <Tab title="Environment Variables">
+    Use the `QDRANT__` prefix with double underscores for nesting:
+    
+    ```bash
+    export QDRANT__LOG_LEVEL=INFO
+    export QDRANT__STORAGE__STORAGE_PATH=./storage
+    export QDRANT__SERVICE__HTTP_PORT=6333
+    ```
+    
+    Environment variables override configuration file settings.
+  </Tab>
+  
+  <Tab title="Command Line">
+    Pass configuration via command-line flags:
+    
+    ```bash
+    ./qdrant --uri http://localhost:6335 --bootstrap http://node1:6335
+    ```
+    
+    Command-line arguments have the highest priority.
+  </Tab>
+</Tabs>
+
+## Logging Configuration
+
+```yaml
+log_level: INFO
+
+logger:
+  # Logging format: text or json
+  format: text
+  
+  # Optional: log to disk
+  on_disk:
+    enabled: true
+    log_file: /var/log/qdrant/qdrant.log
+    log_level: INFO
+    format: text
+    buffer_size_bytes: 1024
+```
+
+### Log Levels
+
+- `TRACE` - Most verbose, includes all operations
+- `DEBUG` - Detailed debugging information
+- `INFO` - General information (default)
+- `WARN` - Warning messages only
+- `ERROR` - Error messages only
+
+<Warning>
+Disk logging creates a file that may grow indefinitely. Monitor disk space when enabled.
+</Warning>
+
+## Storage Configuration
+
+### Basic Storage
+
+```yaml
+storage:
+  # Where to store all vector data and indexes
+  storage_path: ./storage
+  
+  # Where to store collection snapshots
+  snapshots_path: ./snapshots
+  
+  # Where to store temporary files
+  # If null, uses: storage/snapshots_temp/
+  temp_path: null
+```
+
+### Payload Storage
+
+```yaml
+storage:
+  # Store payloads on disk instead of in memory
+  # Saves RAM at the cost of slightly slower retrieval
+  # Indexed payloads remain in memory
+  on_disk_payload: true
+```
+
+<Note>
+Setting `on_disk_payload: true` significantly reduces memory usage for large datasets with substantial payload data.
+</Note>
+
+### Snapshots Configuration
+
+```yaml
+storage:
+  snapshots_config:
+    # Storage location: local or s3
+    snapshots_storage: local
+    
+    # Optional S3 configuration
+    # s3_config:
+    #   bucket: my-qdrant-snapshots
+    #   region: us-east-1
+    #   access_key: YOUR_ACCESS_KEY
+    #   secret_key: YOUR_SECRET_KEY
+```
+
+### Write-Ahead Log (WAL)
+
+```yaml
+storage:
+  wal:
+    # Size of a single WAL segment in megabytes
+    wal_capacity_mb: 32
+    
+    # Number of WAL segments to pre-allocate
+    # Higher values reduce latency spikes during segment creation
+    wal_segments_ahead: 0
+```
+
+## Performance Configuration
+
+### Thread Pools
+
+```yaml
+storage:
+  performance:
+    # Number of threads for search operations
+    # 0 = auto-detect based on CPU cores
+    max_search_threads: 0
+    
+    # CPU budget for optimization jobs
+    # 0 = auto (leave 1+ CPUs free)
+    # Negative = subtract from available CPUs
+    # Positive = use exact number of CPUs
+    optimizer_cpu_budget: 0
+```
+
+### Concurrency Limits
+
+```yaml
+storage:
+  # Maximum concurrent updates
+  # Prevents DDoS in distributed mode
+  # null = automatic selection
+  update_concurrency: null
+  
+  performance:
+    # Rate limit for updates (requests per second)
+    # null = no limit
+    update_rate_limit: null
+    
+    # Limit incoming automatic shard transfers per collection
+    # null = unlimited
+    incoming_shard_transfers_limit: 1
+    
+    # Limit outgoing automatic shard transfers per collection
+    # null = unlimited
+    outgoing_shard_transfers_limit: 1
+```
+
+### Advanced Performance
+
+```yaml
+storage:
+  performance:
+    # Enable async scorer using io_uring (Linux only)
+    # Requires kernel support
+    async_scorer: false
+    
+    # Maximum concurrent collection loads at startup
+    max_concurrent_collection_loads: 1
+    
+    # Maximum concurrent shard loads per collection
+    max_concurrent_shard_loads: 1
+    
+    # Maximum concurrent segment loads per shard
+    max_concurrent_segment_loads: 8
+```
+
+## Optimizer Configuration
+
+### Basic Optimizers
+
+```yaml
+storage:
+  optimizers:
+    # Minimum fraction of deleted vectors to trigger optimization
+    deleted_threshold: 0.2
+    
+    # Minimum vectors in segment to allow optimization
+    vacuum_min_vector_number: 1000
+    
+    # Target number of segments
+    # 0 = auto-select based on CPU count
+    default_segment_number: 0
+    
+    # Maximum segment size in kilobytes
+    # null = auto-select based on CPU count
+    # 1KB = 1 vector of size 256
+    max_segment_size_kb: null
+    
+    # Threshold for creating vector index (in KB)
+    # Vectors below this size use plain index
+    # 0 = disable indexing entirely
+    indexing_threshold_kb: 10000
+    
+    # Interval between forced flushes (seconds)
+    flush_interval_sec: 5
+    
+    # Max optimization threads per shard
+    # null = dynamic, saturate CPU
+    # 0 = disable optimizations
+    max_optimization_threads: null
+```
+
+<Tip>
+**Tuning Tips:**
+- Lower `max_segment_size_kb` for faster indexing
+- Higher `max_segment_size_kb` for better search performance
+- Increase `default_segment_number` for better parallelization
+</Tip>
+
+### Optimizer Overwrite
+
+Force specific optimizer settings for all collections:
+
+```yaml
+storage:
+  # Override collection-specific optimizer settings
+  optimizers_overwrite:
+    deleted_threshold: 0.2
+    vacuum_min_vector_number: 1000
+    default_segment_number: 0
+    max_segment_size_kb: null
+    indexing_threshold_kb: 10000
+    flush_interval_sec: 5
+    max_optimization_threads: null
+```
+
+## HNSW Index Configuration
+
+```yaml
+storage:
+  hnsw_index:
+    # Number of edges per node
+    # Higher = more accurate, more memory
+    m: 16
+    
+    # Neighbors to consider during index build
+    # Higher = more accurate, slower build
+    ef_construct: 100
+    
+    # Size threshold for full-scan vs HNSW (in KB)
+    # Below this threshold, use full-scan for better performance
+    full_scan_threshold_kb: 10000
+    
+    # Threads for background index building
+    # 0 = auto-select
+    # Keep between 8-16 for optimal HNSW graphs
+    max_indexing_threads: 0
+    
+    # Store HNSW index on disk instead of RAM
+    on_disk: false
+    
+    # Custom M param for payload indexes
+    # null = use default M
+    payload_m: null
+```
+
+### HNSW Performance vs Accuracy
+
+<CardGroup cols={2}>
+  <Card title="High Performance" icon="gauge-high">
+    ```yaml
+    m: 8
+    ef_construct: 64
+    ```
+    
+    Faster builds, lower memory, less accurate
+  </Card>
+  
+  <Card title="High Accuracy" icon="crosshairs">
+    ```yaml
+    m: 32
+    ef_construct: 200
+    ```
+    
+    Slower builds, more memory, more accurate
+  </Card>
+</CardGroup>
+
+## Service Configuration
+
+### Network Settings
+
+```yaml
+service:
+  # Host to bind (0.0.0.0 = all interfaces)
+  host: 0.0.0.0
+  
+  # HTTP API port
+  http_port: 6333
+  
+  # gRPC port (null = disabled)
+  grpc_port: 6334
+  
+  # Enable CORS for browser access
+  enable_cors: true
+  
+  # Maximum POST request size in megabytes
+  max_request_size_mb: 32
+  
+  # Number of API worker threads
+  # 0 = number of CPU cores
+  max_workers: 0
+```
+
+### TLS/SSL
+
+```yaml
+service:
+  # Enable HTTPS for REST and gRPC
+  enable_tls: false
+  
+  # Verify client certificates
+  verify_https_client_certificate: false
+```
+
+## Collection Defaults
+
+```yaml
+storage:
+  collection:
+    # Default replication factor for new collections
+    replication_factor: 1
+    
+    # Default write consistency factor
+    write_consistency_factor: 1
+    
+    # Default vector storage mode
+    vectors:
+      # null = in-memory, true = on-disk
+      on_disk: null
+    
+    # Default quantization (null = disabled)
+    quantization: null
+```
+
+### Strict Mode
+
+```yaml
+storage:
+  collection:
+    strict_mode:
+      # Enable strict mode for new collections
+      enabled: false
+      
+      # Max limit for query results
+      max_query_limit: null
+      
+      # Max timeout for requests
+      max_timeout: null
+      
+      # Allow unindexed fields in search filters
+      unindexed_filtering_retrieve: null
+      
+      # Allow unindexed fields in update filters
+      unindexed_filtering_update: null
+      
+      # Max HNSW ef parameter in search
+      search_max_hnsw_ef: null
+      
+      # Allow exact search
+      search_allow_exact: null
+      
+      # Max oversampling in search
+      search_max_oversampling: null
+```
+
+### Collection Limits
+
+```yaml
+storage:
+  # Maximum number of collections allowed
+  # null = unlimited
+  max_collections: null
+```
+
+## Node Types
+
+```yaml
+storage:
+  # Node type: Normal or Listener
+  node_type: "Normal"
+```
+
+<Tabs>
+  <Tab title="Normal">
+    **Normal Node**
+    
+    ```yaml
+    node_type: "Normal"
+    ```
+    
+    - Receives all updates
+    - Answers all queries
+    - Standard operation mode
+  </Tab>
+  
+  <Tab title="Listener">
+    **Listener Node**
+    
+    ```yaml
+    node_type: "Listener"
+    ```
+    
+    - Receives all updates
+    - Does NOT answer search/read queries
+    - Useful for dedicated backup nodes
+  </Tab>
+</Tabs>
+
+## Cluster Configuration
+
+```yaml
+cluster:
+  # Enable distributed mode
+  enabled: false
+  
+  # P2P communication settings
+  p2p:
+    # Port for inter-node communication
+    port: 6335
+    
+    # Enable TLS for P2P
+    enable_tls: false
+  
+  # Raft consensus configuration
+  consensus:
+    # Peer ping frequency (milliseconds)
+    # Lower = faster failure detection, higher overhead
+    tick_period_ms: 100
+    
+    # Compact consensus log after N operations
+    # 0 = disable compaction
+    compact_wal_entries: 128
+```
+
+<Warning>
+Do not modify `tick_period_ms` without understanding the implications. It affects cluster stability and performance.
+</Warning>
+
+## Shard Transfer
+
+```yaml
+storage:
+  # Default shard transfer method
+  # Options: stream_records, snapshot, wal_delta, null (auto)
+  shard_transfer_method: null
+```
+
+## TLS Configuration
+
+```yaml
+tls:
+  # Server certificate chain
+  cert: ./tls/cert.pem
+  
+  # Server private key
+  key: ./tls/key.pem
+  
+  # CA certificate for peer verification
+  ca_cert: ./tls/cacert.pem
+  
+  # Certificate reload TTL in seconds
+  # null = no automatic reload
+  # Only works for HTTPS, not gRPC
+  cert_ttl: 3600
+```
+
+## Audit Logging
+
+```yaml
+audit:
+  # Enable audit logging
+  enabled: false
+  
+  # Directory for audit logs
+  dir: ./storage/audit
+  
+  # Rotation: daily, hourly, or size-based
+  rotation: daily
+  
+  # Maximum number of log files to keep
+  max_log_files: 7
+  
+  # Trust X-Forwarded-For header for client IP
+  # WARNING: Only enable behind trusted proxy
+  trust_forwarded_headers: false
+```
+
+<Warning>
+Enabling `trust_forwarded_headers` without a trusted proxy allows clients to spoof their IP addresses.
+</Warning>
+
+## Telemetry
+
+```yaml
+# Disable anonymous usage statistics
+telemetry_disabled: false
+```
+
+## Metrics Configuration
+
+```yaml
+service:
+  # Prefix for metric names in /metrics endpoint
+  metrics_prefix: qdrant_
+```
+
+## Hardware Reporting
+
+```yaml
+service:
+  # Add resource usage hints to API responses (experimental)
+  hardware_reporting: false
+```
+
+<Note>
+Hardware reporting is experimental and not yet officially supported.
+</Note>
+
+## Complete Configuration Example
+
+<Accordion title="View Full config.yaml Example">
+```yaml
+log_level: INFO
+
+storage:
+  storage_path: ./storage
+  snapshots_path: ./snapshots
+  temp_path: null
+  on_disk_payload: true
+  update_concurrency: null
+  
+  wal:
+    wal_capacity_mb: 32
+    wal_segments_ahead: 0
+  
+  node_type: "Normal"
+  
+  performance:
+    max_search_threads: 0
+    optimizer_cpu_budget: 0
+    update_rate_limit: null
+    incoming_shard_transfers_limit: 1
+    outgoing_shard_transfers_limit: 1
+    async_scorer: false
+    max_concurrent_collection_loads: 1
+    max_concurrent_shard_loads: 1
+    max_concurrent_segment_loads: 8
+  
+  optimizers:
+    deleted_threshold: 0.2
+    vacuum_min_vector_number: 1000
+    default_segment_number: 0
+    max_segment_size_kb: null
+    indexing_threshold_kb: 10000
+    flush_interval_sec: 5
+    max_optimization_threads: null
+  
+  hnsw_index:
+    m: 16
+    ef_construct: 100
+    full_scan_threshold_kb: 10000
+    max_indexing_threads: 0
+    on_disk: false
+    payload_m: null
+  
+  shard_transfer_method: null
+  
+  collection:
+    replication_factor: 1
+    write_consistency_factor: 1
+    vectors:
+      on_disk: null
+    quantization: null
+  
+  max_collections: null
+
+service:
+  max_request_size_mb: 32
+  max_workers: 0
+  host: 0.0.0.0
+  http_port: 6333
+  grpc_port: 6334
+  enable_cors: true
+  enable_tls: false
+  verify_https_client_certificate: false
+
+cluster:
+  enabled: false
+  p2p:
+    port: 6335
+    enable_tls: false
+  consensus:
+    tick_period_ms: 100
+    compact_wal_entries: 128
+
+telemetry_disabled: false
+```
+</Accordion>
+
+## Environment Variable Reference
+
+Configuration keys map to environment variables using the pattern:
+
+```
+QDRANT__<SECTION>__<SUBSECTION>__<KEY>=value
+```
+
+### Examples
+
+```bash
+# Log level
+QDRANT__LOG_LEVEL=DEBUG
+
+# Storage path
+QDRANT__STORAGE__STORAGE_PATH=/data/qdrant
+
+# Service port
+QDRANT__SERVICE__HTTP_PORT=8080
+
+# Cluster mode
+QDRANT__CLUSTER__ENABLED=true
+QDRANT__CLUSTER__P2P__PORT=6335
+
+# Performance
+QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS=8
+QDRANT__STORAGE__HNSW_INDEX__M=32
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Security" icon="shield" href="/deployment/security">
+    Configure API keys and TLS
+  </Card>
+  <Card title="Distributed Mode" icon="network-wired" href="/deployment/distributed">
+    Set up a cluster
+  </Card>
+  <Card title="Docker" icon="docker" href="/deployment/docker">
+    Deploy with Docker
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
+    Deploy on Kubernetes
+  </Card>
+</CardGroup>

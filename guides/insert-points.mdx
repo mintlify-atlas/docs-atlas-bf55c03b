@@ -1,0 +1,371 @@
+---
+title: Insert Points
+description: Learn how to insert and upsert points (vectors with payloads) into Qdrant collections using the REST API and Python client.
+---
+
+Points are the core data structure in Qdrant. Each point consists of an ID, a vector (or multiple vectors), and an optional payload.
+
+## API Endpoint
+
+```
+PUT /collections/{collection_name}/points
+```
+
+This endpoint performs an upsert operation: if a point with the given ID already exists, it will be overwritten. Otherwise, a new point will be created.
+
+## Point Structure
+
+Each point has the following structure:
+
+<ParamField path="id" type="integer | string" required>
+  Unique identifier for the point. Can be an integer or UUID string.
+</ParamField>
+
+<ParamField path="vector" type="array | object" required>
+  Vector data. Can be a simple array for single vectors or an object with named vectors.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  Optional JSON object with additional data associated with the point.
+</ParamField>
+
+## Insert a Single Point
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/my_collection/points \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [
+      {
+        "id": 1,
+        "vector": [0.05, 0.61, 0.76, 0.74],
+        "payload": {
+          "city": "Berlin",
+          "country": "Germany",
+          "population": 3645000,
+          "year": 2023
+        }
+      }
+    ]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.upsert(
+    collection_name="my_collection",
+    points=[
+        PointStruct(
+            id=1,
+            vector=[0.05, 0.61, 0.76, 0.74],
+            payload={
+                "city": "Berlin",
+                "country": "Germany",
+                "population": 3645000,
+                "year": 2023
+            }
+        )
+    ]
+)
+```
+
+</CodeGroup>
+
+## Insert Multiple Points (Batch)
+
+Batch insertion is more efficient for inserting multiple points at once.
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/my_collection/points \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [
+      {
+        "id": 1,
+        "vector": [0.05, 0.61, 0.76, 0.74],
+        "payload": {"city": "Berlin", "country": "Germany"}
+      },
+      {
+        "id": 2,
+        "vector": [0.19, 0.81, 0.75, 0.11],
+        "payload": {"city": "London", "country": "UK"}
+      },
+      {
+        "id": 3,
+        "vector": [0.36, 0.55, 0.47, 0.94],
+        "payload": {"city": "Paris", "country": "France"}
+      }
+    ]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
+
+client = QdrantClient(url="http://localhost:6333")
+
+points = [
+    PointStruct(
+        id=1,
+        vector=[0.05, 0.61, 0.76, 0.74],
+        payload={"city": "Berlin", "country": "Germany"}
+    ),
+    PointStruct(
+        id=2,
+        vector=[0.19, 0.81, 0.75, 0.11],
+        payload={"city": "London", "country": "UK"}
+    ),
+    PointStruct(
+        id=3,
+        vector=[0.36, 0.55, 0.47, 0.94],
+        payload={"city": "Paris", "country": "France"}
+    )
+]
+
+client.upsert(
+    collection_name="my_collection",
+    points=points
+)
+```
+
+</CodeGroup>
+
+## Insert Points with Named Vectors
+
+For collections with multiple named vectors, specify each vector separately.
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/multi_vector_collection/points \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [
+      {
+        "id": 1,
+        "vector": {
+          "text": [0.1, 0.2, 0.3, 0.4],
+          "image": [0.5, 0.6, 0.7, 0.8]
+        },
+        "payload": {
+          "title": "Product A",
+          "description": "High quality item"
+        }
+      }
+    ]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.upsert(
+    collection_name="multi_vector_collection",
+    points=[
+        PointStruct(
+            id=1,
+            vector={
+                "text": [0.1, 0.2, 0.3, 0.4],
+                "image": [0.5, 0.6, 0.7, 0.8]
+            },
+            payload={
+                "title": "Product A",
+                "description": "High quality item"
+            }
+        )
+    ]
+)
+```
+
+</CodeGroup>
+
+## Insert Points Using Batch Format
+
+The batch format is more efficient for inserting many points with the same structure.
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/my_collection/points \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "batch": {
+      "ids": [1, 2, 3],
+      "vectors": [
+        [0.05, 0.61, 0.76, 0.74],
+        [0.19, 0.81, 0.75, 0.11],
+        [0.36, 0.55, 0.47, 0.94]
+      ],
+      "payloads": [
+        {"city": "Berlin"},
+        {"city": "London"},
+        {"city": "Paris"}
+      ]
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.upload_collection(
+    collection_name="my_collection",
+    vectors=[
+        [0.05, 0.61, 0.76, 0.74],
+        [0.19, 0.81, 0.75, 0.11],
+        [0.36, 0.55, 0.47, 0.94]
+    ],
+    payload=[
+        {"city": "Berlin"},
+        {"city": "London"},
+        {"city": "Paris"}
+    ],
+    ids=[1, 2, 3]
+)
+```
+
+</CodeGroup>
+
+## Query Parameters
+
+<ParamField query="wait" type="boolean" default="true">
+  If `true`, wait for changes to actually happen. If `false`, return immediately after the request is accepted.
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Define ordering guarantees for the operation:
+  - `weak` - No ordering guarantees
+  - `medium` - Operations are ordered within a single node
+  - `strong` - Operations are ordered across all nodes
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for the operation in seconds.
+</ParamField>
+
+### Using the Wait Parameter
+
+<Tabs>
+  <Tab title="Wait for completion">
+    ```bash
+    curl -X PUT "http://localhost:6333/collections/my_collection/points?wait=true" \
+      -H 'Content-Type: application/json' \
+      -d '{...}'
+    ```
+    
+    The request will return only after the points are fully indexed and available for search.
+  </Tab>
+  
+  <Tab title="Return immediately">
+    ```bash
+    curl -X PUT "http://localhost:6333/collections/my_collection/points?wait=false" \
+      -H 'Content-Type: application/json' \
+      -d '{...}'
+    ```
+    
+    The request returns immediately after accepting the operation. Points may not be immediately searchable.
+  </Tab>
+</Tabs>
+
+<Note>
+  Setting `wait=false` provides lower latency but points may not be immediately available for search.
+</Note>
+
+## Response Format
+
+<ResponseField name="result" type="object">
+  Result of the upsert operation.
+  
+  <ResponseField name="result.operation_id" type="integer">
+    Sequential number of the operation.
+  </ResponseField>
+  
+  <ResponseField name="result.status" type="string">
+    Operation status: `completed` or `acknowledged`.
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Overall response status, typically "ok".
+</ResponseField>
+
+<ResponseField name="time" type="number">
+  Time taken to execute the operation in seconds.
+</ResponseField>
+
+```json Response Example
+{
+  "result": {
+    "operation_id": 0,
+    "status": "completed"
+  },
+  "status": "ok",
+  "time": 0.002375
+}
+```
+
+## Update Modes
+
+Control how points are inserted or updated:
+
+<CodeGroup>
+
+```bash Insert Only (Skip Existing)
+curl -X PUT http://localhost:6333/collections/my_collection/points \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [...],
+    "update_mode": "insert_only"
+  }'
+```
+
+```bash Update Only (Skip New)
+curl -X PUT http://localhost:6333/collections/my_collection/points \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [...],
+    "update_mode": "update_only"
+  }'
+```
+
+```bash Upsert (Default)
+curl -X PUT http://localhost:6333/collections/my_collection/points \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [...],
+    "update_mode": "upsert"
+  }'
+```
+
+</CodeGroup>
+
+<ParamField path="update_mode" type="string" default="upsert">
+  - `upsert` - Insert new points and update existing ones (default)
+  - `insert_only` - Only insert new points, skip existing ones
+  - `update_only` - Only update existing points, skip new ones
+</ParamField>
+
+<Warning>
+  Vector dimensions must match the collection configuration. Mismatched dimensions will result in an error.
+</Warning>
+
+## Best Practices
+
+1. **Batch Size**: Insert points in batches of 100-1000 for optimal performance
+2. **Wait Parameter**: Use `wait=false` for bulk uploads to improve throughput
+3. **Payload Size**: Keep payloads reasonably sized (< 1MB per point) for best performance
+4. **IDs**: Use sequential integers or UUIDs; avoid very long string IDs

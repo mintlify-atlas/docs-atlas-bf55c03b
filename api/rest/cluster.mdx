@@ -1,0 +1,346 @@
+---
+title: Cluster API
+description: REST API endpoints for managing Qdrant cluster operations and distributed deployment
+---
+
+When running Qdrant in distributed mode, these endpoints help you manage the cluster, monitor peer health, and perform cluster operations.
+
+## Get Cluster Status
+
+Retrieve information about the current state and composition of the cluster.
+
+```bash
+curl -X GET 'http://localhost:6333/cluster'
+```
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="status" type="string">
+    Overall cluster status: `enabled` or `disabled`
+  </ResponseField>
+  
+  <ResponseField name="peer_id" type="integer">
+    Current peer's ID
+  </ResponseField>
+  
+  <ResponseField name="peers" type="object">
+    Map of peer IDs to peer information
+    
+    <ResponseField name="uri" type="string">
+      Peer's URI
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="raft_info" type="object">
+    Raft consensus information
+    
+    <ResponseField name="term" type="integer">
+      Current Raft term
+    </ResponseField>
+    
+    <ResponseField name="commit" type="integer">
+      Last committed log index
+    </ResponseField>
+    
+    <ResponseField name="pending_operations" type="integer">
+      Number of pending operations
+    </ResponseField>
+    
+    <ResponseField name="leader" type="integer">
+      Current leader peer ID
+    </ResponseField>
+    
+    <ResponseField name="role" type="string">
+      This peer's role: `Leader`, `Follower`, or `Candidate`
+    </ResponseField>
+    
+    <ResponseField name="is_voter" type="boolean">
+      Whether this peer is a voting member
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="consensus_thread_status" type="object">
+    Status of the consensus thread
+    
+    <ResponseField name="consensus_thread_status" type="string">
+      Status: `working`, `stopped`, or `stopped_with_err`
+    </ResponseField>
+    
+    <ResponseField name="last_update" type="string">
+      ISO 8601 timestamp of last update
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="message_send_failures" type="object">
+    Map of peer IDs to message send failure counts
+  </ResponseField>
+</ResponseField>
+
+## Get Cluster Telemetry
+
+Collect detailed telemetry data from the cluster perspective, including peers info, collections info, shard transfers, and resharding status.
+
+```bash
+curl -X GET 'http://localhost:6333/cluster/telemetry'
+```
+
+**Query Parameters**
+
+<ParamField query="details_level" type="integer">
+  Level of detail to include in the response. Higher values include more detailed information.
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Timeout for this request in seconds. Default is 60.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  Comprehensive telemetry data including:
+  
+  <ResponseField name="peers" type="object">
+    Information about all peers in the cluster
+  </ResponseField>
+  
+  <ResponseField name="collections" type="object">
+    Collection-level telemetry for all collections
+  </ResponseField>
+  
+  <ResponseField name="shards" type="object">
+    Shard distribution and status across the cluster
+  </ResponseField>
+  
+  <ResponseField name="transfers" type="array">
+    Active and pending shard transfer operations
+  </ResponseField>
+</ResponseField>
+
+## Remove Peer from Cluster
+
+Remove a peer from the cluster. The operation will fail if the peer has active shards.
+
+```bash
+curl -X DELETE 'http://localhost:6333/cluster/peer/{peer_id}'
+```
+
+**Path Parameters**
+
+<ParamField path="peer_id" type="integer" required>
+  ID of the peer to remove
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="force" type="boolean">
+  If true, removes peer even if it has shards/replicas on it. Default is false. Use with caution as this can lead to data loss.
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Wait for operation commit timeout in seconds. If timeout is reached, request returns with service error.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if peer was removed successfully
+</ResponseField>
+
+## Recover Current Peer
+
+Attempt to recover the current peer's Raft state. This operation should only be used in recovery scenarios when the cluster consensus is broken.
+
+```bash
+curl -X POST 'http://localhost:6333/cluster/recover'
+```
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if recovery operation was initiated successfully
+</ResponseField>
+
+## Collection Cluster Info
+
+Get cluster-specific information for a particular collection, including shard distribution and replication status.
+
+```bash
+curl -X GET 'http://localhost:6333/collections/{collection_name}/cluster'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="peer_id" type="integer">
+    Current peer ID
+  </ResponseField>
+  
+  <ResponseField name="shard_count" type="integer">
+    Total number of shards for this collection
+  </ResponseField>
+  
+  <ResponseField name="local_shards" type="array">
+    Shards located on the current peer
+    
+    <ResponseField name="shard_id" type="integer">
+      Shard identifier
+    </ResponseField>
+    
+    <ResponseField name="points_count" type="integer">
+      Number of points in this shard
+    </ResponseField>
+    
+    <ResponseField name="state" type="string">
+      Shard state: `Active`, `Dead`, `Partial`, `Initializing`, or `Listener`
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="remote_shards" type="array">
+    Shards located on other peers
+    
+    <ResponseField name="shard_id" type="integer">
+      Shard identifier
+    </ResponseField>
+    
+    <ResponseField name="peer_id" type="integer">
+      ID of the peer hosting this shard
+    </ResponseField>
+    
+    <ResponseField name="state" type="string">
+      Shard state
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="shard_transfers" type="array">
+    Active shard transfer operations
+    
+    <ResponseField name="shard_id" type="integer">
+      Shard being transferred
+    </ResponseField>
+    
+    <ResponseField name="from" type="integer">
+      Source peer ID
+    </ResponseField>
+    
+    <ResponseField name="to" type="integer">
+      Destination peer ID
+    </ResponseField>
+    
+    <ResponseField name="sync" type="boolean">
+      Whether transfer is synchronous
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+## Update Collection Cluster Setup
+
+Perform cluster operations on a collection, such as moving shards, creating replicas, or aborting transfers.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/cluster' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "move_shard": {
+      "shard_id": 0,
+      "from_peer_id": 1,
+      "to_peer_id": 2
+    }
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="timeout" type="integer">
+  Wait for operation commit timeout in seconds
+</ParamField>
+
+**Request Body**
+
+One of the following operations:
+
+<ParamField body="move_shard" type="object">
+  Move a shard from one peer to another
+  
+  <ParamField body="shard_id" type="integer" required>
+    ID of the shard to move
+  </ParamField>
+  
+  <ParamField body="from_peer_id" type="integer" required>
+    Source peer ID
+  </ParamField>
+  
+  <ParamField body="to_peer_id" type="integer" required>
+    Destination peer ID
+  </ParamField>
+  
+  <ParamField body="method" type="string">
+    Transfer method: `stream_records` or `snapshot`. Default is `stream_records`.
+  </ParamField>
+</ParamField>
+
+<ParamField body="replicate_shard" type="object">
+  Create a replica of a shard on another peer
+  
+  <ParamField body="shard_id" type="integer" required>
+    ID of the shard to replicate
+  </ParamField>
+  
+  <ParamField body="from_peer_id" type="integer" required>
+    Source peer ID
+  </ParamField>
+  
+  <ParamField body="to_peer_id" type="integer" required>
+    Destination peer ID
+  </ParamField>
+  
+  <ParamField body="method" type="string">
+    Transfer method
+  </ParamField>
+</ParamField>
+
+<ParamField body="abort_transfer" type="object">
+  Abort an ongoing shard transfer
+  
+  <ParamField body="shard_id" type="integer" required>
+    ID of the shard
+  </ParamField>
+  
+  <ParamField body="from_peer_id" type="integer" required>
+    Source peer ID
+  </ParamField>
+  
+  <ParamField body="to_peer_id" type="integer" required>
+    Destination peer ID
+  </ParamField>
+</ParamField>
+
+<ParamField body="drop_replica" type="object">
+  Remove a replica from a peer
+  
+  <ParamField body="shard_id" type="integer" required>
+    ID of the shard
+  </ParamField>
+  
+  <ParamField body="peer_id" type="integer" required>
+    Peer ID to remove replica from
+  </ParamField>
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="boolean">
+  Returns `true` if cluster operation was initiated successfully
+</ResponseField>

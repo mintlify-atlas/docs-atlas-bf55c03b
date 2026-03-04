@@ -1,0 +1,561 @@
+---
+title: Performance Tuning
+description: Optimize Qdrant performance with indexing parameters, search threads, memory settings, and CPU budgets
+---
+
+Qdrant provides extensive configuration options to optimize performance for your specific workload.
+
+## Indexing Parameters
+
+### HNSW Index Configuration
+
+HNSW (Hierarchical Navigable Small World) is the primary index type in Qdrant.
+
+```yaml config/config.yaml
+storage:
+  hnsw_index:
+    # Number of edges per node
+    m: 16
+    
+    # Number of neighbors during construction
+    ef_construct: 100
+    
+    # Full-scan threshold (in KB)
+    full_scan_threshold_kb: 10000
+    
+    # Number of parallel indexing threads
+    max_indexing_threads: 0  # 0 = auto-select
+    
+    # Store index on disk
+    on_disk: false
+    
+    # Custom M for payload index
+    payload_m: null
+```
+
+#### Parameter Guidelines
+
+**`m` (edges per node)**
+- Higher values → better search accuracy, more memory
+- Lower values → faster indexing, less memory
+- Recommended: 16-32 for most use cases
+- 64+ for very high accuracy requirements
+
+**`ef_construct` (construction neighbors)**
+- Higher values → better index quality, slower indexing
+- Lower values → faster indexing, lower accuracy
+- Recommended: 100-200 for balanced performance
+- 400+ for maximum accuracy
+
+**`full_scan_threshold_kb`**
+- Below this size, use full scan instead of HNSW
+- Note: 1 KB ≈ 1 vector of size 256
+- Default: 10000 (suitable for most cases)
+
+### Per-Collection Index Settings
+
+Override global settings per collection:
+
+```bash
+curl -X PUT http://localhost:6333/collections/my_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 768,
+      "distance": "Cosine",
+      "hnsw_config": {
+        "m": 32,
+        "ef_construct": 200,
+        "full_scan_threshold": 20000
+      }
+    }
+  }'
+```
+
+### Indexing Threshold
+
+Control when vectors are indexed:
+
+```yaml config/config.yaml
+storage:
+  optimizers:
+    # Minimum size before indexing (in KB)
+    indexing_threshold_kb: 10000
+```
+
+- Set to `0` to disable indexing (use for small collections)
+- Higher values delay indexing until more data is collected
+- Note: 1 KB = 1 vector of size 256
+
+### On-Disk Index
+
+Store HNSW index on disk to save memory:
+
+```yaml config/config.yaml
+storage:
+  hnsw_index:
+    on_disk: true
+```
+
+<Note>
+On-disk indexing reduces RAM usage but may increase query latency due to disk I/O.
+</Note>
+
+## Search Threads
+
+Control parallelism for search operations.
+
+### Maximum Search Threads
+
+```yaml config/config.yaml
+storage:
+  performance:
+    # Number of parallel threads for search
+    max_search_threads: 0  # 0 = auto-select based on CPU count
+```
+
+- **0** - Automatic (recommended): `max(1, CPU_count - 1)`
+- **Positive number** - Use exactly this many threads
+- **Higher values** - Better search throughput, more CPU usage
+
+### Service Workers
+
+Control API request handling parallelism:
+
+```yaml config/config.yaml
+service:
+  max_workers: 0  # 0 = match CPU count
+```
+
+This affects:
+- Concurrent request handling
+- REST API parallelism
+- gRPC stream processing
+
+## Optimizer CPU Budget
+
+Control resources allocated to background optimization.
+
+```yaml config/config.yaml
+storage:
+  performance:
+    optimizer_cpu_budget: 0
+```
+
+Options:
+- **0** (default) - Auto-select, reserve 1+ CPUs
+- **Positive** - Use exactly this many CPUs
+- **Negative** - Subtract from available CPUs (e.g., -2 = total_cpus - 2)
+
+### Optimization Threads
+
+Control concurrent optimization tasks:
+
+```yaml config/config.yaml
+storage:
+  optimizers:
+    max_optimization_threads: null  # null = no limit, choose dynamically
+```
+
+- **null** - Dynamic, saturate available CPU
+- **0** - Disable optimizations
+- **Positive** - Limit concurrent optimization jobs
+
+Note: Each optimization job also uses `max_indexing_threads` for index building.
+
+### Indexing Threads
+
+```yaml config/config.yaml
+storage:
+  hnsw_index:
+    max_indexing_threads: 0  # 0 = auto-select
+```
+
+- Recommended: 8-16 threads
+- Too many threads may create inefficient HNSW graphs
+- On small CPUs, fewer threads are used automatically
+
+## Memory Settings
+
+### On-Disk Payload
+
+Reduce memory usage by storing payloads on disk:
+
+```yaml config/config.yaml
+storage:
+  on_disk_payload: true
+```
+
+Effect:
+- Payloads read from disk on each request
+- Saves RAM
+- Slightly increases response time
+- Indexed payload fields remain in RAM
+
+### On-Disk Vectors
+
+Store vectors on disk:
+
+```yaml config/config.yaml
+storage:
+  collection:
+    vectors:
+      on_disk: true
+```
+
+Or per collection:
+
+```bash
+curl -X PUT http://localhost:6333/collections/my_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 768,
+      "distance": "Cosine",
+      "on_disk": true
+    }
+  }'
+```
+
+<Warning>
+On-disk vectors significantly impact search performance. Use only when memory is constrained.
+</Warning>
+
+### Segment Size Limits
+
+Control segment size to balance performance:
+
+```yaml config/config.yaml
+storage:
+  optimizers:
+    # Maximum segment size (in KB)
+    max_segment_size_kb: null  # null = auto-select
+```
+
+- Smaller segments → faster indexing, more segments
+- Larger segments → better search speed, slower indexing
+- Note: 1 KB = 1 vector of size 256
+
+### Default Segment Number
+
+```yaml config/config.yaml
+storage:
+  optimizers:
+    default_segment_number: 0  # 0 = auto-select by CPU count
+```
+
+Recommendation: Set as factor of `max_search_threads` for even distribution.
+
+## Async Scorer
+
+Enable high-performance async I/O for rescoring (Linux only).
+
+```yaml config/config.yaml
+storage:
+  performance:
+    async_scorer: true
+```
+
+Requirements:
+- Linux kernel with `io_uring` support
+- Significantly improves performance for on-disk vectors
+- Must be enabled at kernel level
+
+<Info>
+Async scorer uses `io_uring` for efficient async disk I/O. See [Qdrant io_uring article](https://qdrant.tech/articles/io_uring/) for details.
+</Info>
+
+## Write Performance
+
+### Update Concurrency
+
+```yaml config/config.yaml
+storage:
+  update_concurrency: null  # null = maximum concurrency
+```
+
+Control concurrent updates to shard replicas.
+
+### Update Rate Limiting
+
+```yaml config/config.yaml
+storage:
+  performance:
+    update_rate_limit: null  # null = auto-select
+```
+
+Prevents DDoS from too many concurrent updates in distributed mode.
+
+### Flush Interval
+
+```yaml config/config.yaml
+storage:
+  optimizers:
+    flush_interval_sec: 5
+```
+
+How often to flush segments to disk:
+- Lower values → better durability, more I/O
+- Higher values → better write performance, risk of data loss
+
+### WAL Configuration
+
+```yaml config/config.yaml
+storage:
+  wal:
+    wal_capacity_mb: 32
+    wal_segments_ahead: 0
+```
+
+- **wal_capacity_mb** - Size of each WAL segment
+- **wal_segments_ahead** - Pre-allocate segments for faster writes
+
+## Collection Loading
+
+Control concurrent collection loading:
+
+```yaml config/config.yaml
+storage:
+  performance:
+    max_concurrent_collection_loads: 1
+    max_concurrent_shard_loads: 1
+    max_concurrent_segment_loads: 8
+```
+
+Optimize startup time vs resource usage.
+
+## Optimization Tuning
+
+### Deleted Threshold
+
+Trigger optimization when enough vectors are deleted:
+
+```yaml config/config.yaml
+storage:
+  optimizers:
+    deleted_threshold: 0.2  # 20% of vectors deleted
+```
+
+### Vacuum Minimum Vectors
+
+```yaml config/config.yaml
+storage:
+  optimizers:
+    vacuum_min_vector_number: 1000
+```
+
+Minimum vectors in segment before optimization.
+
+### Override Optimizers
+
+Force optimizer settings across all collections:
+
+```yaml config/config.yaml
+storage:
+  optimizers_overwrite:
+    deleted_threshold: 0.2
+    vacuum_min_vector_number: 1000
+    default_segment_number: 0
+    max_segment_size_kb: null
+    indexing_threshold_kb: 10000
+    flush_interval_sec: 5
+    max_optimization_threads: null
+```
+
+<Warning>
+Override settings supersede collection-level configuration.
+</Warning>
+
+## Quantization
+
+Reduce memory usage and improve performance with quantization:
+
+```bash
+curl -X PUT http://localhost:6333/collections/my_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 768,
+      "distance": "Cosine"
+    },
+    "quantization_config": {
+      "scalar": {
+        "type": "int8",
+        "quantile": 0.99,
+        "always_ram": true
+      }
+    }
+  }'
+```
+
+Quantization types:
+- **Scalar (int8)** - 4x memory reduction
+- **Product** - Higher compression ratios
+- **Binary** - Maximum compression for specific use cases
+
+See [Quantization documentation](https://qdrant.tech/documentation/guides/quantization) for details.
+
+## Replication Settings
+
+```yaml config/config.yaml
+storage:
+  collection:
+    replication_factor: 1
+    write_consistency_factor: 1
+```
+
+- **replication_factor** - Number of shard copies
+- **write_consistency_factor** - Replicas confirming writes
+
+Higher consistency → better durability, slower writes
+
+## Request Size Limits
+
+```yaml config/config.yaml
+service:
+  max_request_size_mb: 32
+```
+
+Maximum POST data size for a single request.
+
+## Workload-Specific Tuning
+
+### High-Throughput Search
+
+```yaml
+storage:
+  performance:
+    max_search_threads: 16
+    optimizer_cpu_budget: -4  # Reserve CPUs for search
+  hnsw_index:
+    m: 32
+    on_disk: false
+service:
+  max_workers: 0  # Match CPU count
+```
+
+### Large-Scale Indexing
+
+```yaml
+storage:
+  performance:
+    optimizer_cpu_budget: 0  # Use all available CPUs
+    max_search_threads: 4
+  optimizers:
+    max_optimization_threads: null  # No limit
+    flush_interval_sec: 10
+  hnsw_index:
+    max_indexing_threads: 16
+    ef_construct: 100
+```
+
+### Memory-Constrained Environment
+
+```yaml
+storage:
+  on_disk_payload: true
+  hnsw_index:
+    on_disk: true
+    m: 16
+  collection:
+    vectors:
+      on_disk: true
+  optimizers:
+    max_segment_size_kb: 50000
+```
+
+### Balanced Configuration
+
+```yaml
+storage:
+  performance:
+    max_search_threads: 0  # Auto
+    optimizer_cpu_budget: 0  # Auto
+  hnsw_index:
+    m: 16
+    ef_construct: 100
+    on_disk: false
+  on_disk_payload: true
+  optimizers:
+    default_segment_number: 0
+    max_optimization_threads: null
+```
+
+## Monitoring Performance
+
+### Key Metrics
+
+Monitor these metrics for performance insights:
+
+```bash
+curl http://localhost:6333/metrics | grep -E '(search|optimization|memory)'
+```
+
+- `rest_responses_duration_seconds` - Query latency
+- `collection_running_optimizations` - Active optimization tasks
+- `memory_allocated_bytes` - Memory usage
+- `process_threads` - Thread count
+- `collection_update_queue_length` - Write backlog
+
+### Profiling
+
+Enable profiling for detailed performance analysis:
+
+```yaml config/config.yaml
+service:
+  enable_profiling: true
+```
+
+Access profiles at `/debug/pprof/` endpoints.
+
+## Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Start with Defaults" icon="play">
+Begin with default settings and tune based on observed performance bottlenecks.
+</Card>
+
+<Card title="Benchmark Your Data" icon="chart-line">
+Test different configurations with your actual vectors and query patterns.
+</Card>
+
+<Card title="Monitor Before Tuning" icon="gauge">
+Use metrics to identify bottlenecks before making configuration changes.
+</Card>
+
+<Card title="Tune Incrementally" icon="sliders">
+Change one parameter at a time and measure impact before further adjustments.
+</Card>
+
+</CardGroup>
+
+## Troubleshooting
+
+### High CPU Usage
+
+- Reduce `optimizer_cpu_budget`
+- Increase `flush_interval_sec`
+- Lower `max_optimization_threads`
+- Check for excessive concurrent requests
+
+### High Memory Usage
+
+- Enable `on_disk_payload: true`
+- Set `hnsw_index.on_disk: true`
+- Enable vector quantization
+- Reduce `default_segment_number`
+
+### Slow Queries
+
+- Increase `max_search_threads`
+- Tune HNSW parameters (`m`, `ef_construct`)
+- Disable on-disk storage for hot collections
+- Check if indexes are built (not in optimization)
+
+### Slow Indexing
+
+- Increase `optimizer_cpu_budget`
+- Raise `max_indexing_threads`
+- Lower `ef_construct` for faster building
+- Increase `max_segment_size_kb`

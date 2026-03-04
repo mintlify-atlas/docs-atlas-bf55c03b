@@ -1,0 +1,704 @@
+---
+title: Filtering
+description: Learn how to filter search results in Qdrant using various filter conditions including field matches, ranges, geo filters, and nested conditions.
+---
+
+Filters allow you to narrow down search results based on payload conditions. They are combined with vector similarity search to find the most relevant points that match specific criteria.
+
+## Filter Structure
+
+Filters use a boolean logic structure with three main clauses:
+
+<ParamField path="must" type="array">
+  All conditions in this array must be satisfied (AND logic).
+</ParamField>
+
+<ParamField path="should" type="array">
+  At least one condition in this array must be satisfied (OR logic).
+</ParamField>
+
+<ParamField path="must_not" type="array">
+  None of the conditions in this array should be satisfied (NOT logic).
+</ParamField>
+
+## Basic Field Matching
+
+### Match Single Value
+
+Filter points where a field matches a specific value.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "key": "city",
+          "match": {
+            "value": "Berlin"
+          }
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            FieldCondition(
+                key="city",
+                match=MatchValue(value="Berlin")
+            )
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+### Match Any of Multiple Values
+
+Filter points where a field matches any value from a list.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "key": "country",
+          "match": {
+            "any": ["Germany", "France", "UK"]
+          }
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchAny
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            FieldCondition(
+                key="country",
+                match=MatchAny(any=["Germany", "France", "UK"])
+            )
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+## Range Filters
+
+Filter numeric fields using range conditions.
+
+### Greater Than / Less Than
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "key": "population",
+          "range": {
+            "gte": 1000000,
+            "lt": 5000000
+          }
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, Range
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            FieldCondition(
+                key="population",
+                range=Range(
+                    gte=1000000,
+                    lt=5000000
+                )
+            )
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+<ParamField path="range.gt" type="number">
+  Greater than (exclusive).
+</ParamField>
+
+<ParamField path="range.gte" type="number">
+  Greater than or equal to (inclusive).
+</ParamField>
+
+<ParamField path="range.lt" type="number">
+  Less than (exclusive).
+</ParamField>
+
+<ParamField path="range.lte" type="number">
+  Less than or equal to (inclusive).
+</ParamField>
+
+## Geo Filters
+
+Filter points based on geographic location.
+
+### Geo Radius Filter
+
+Find points within a radius of a geographic coordinate.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "key": "location",
+          "geo_radius": {
+            "center": {
+              "lon": 13.4050,
+              "lat": 52.5200
+            },
+            "radius": 10000
+          }
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, GeoRadius, GeoPoint
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            FieldCondition(
+                key="location",
+                geo_radius=GeoRadius(
+                    center=GeoPoint(lon=13.4050, lat=52.5200),
+                    radius=10000.0  # in meters
+                )
+            )
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+<Note>
+  The `radius` is specified in meters. The location field must be stored as a geo point with `lon` and `lat` values.
+</Note>
+
+### Geo Bounding Box Filter
+
+Find points within a rectangular geographic area.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "key": "location",
+          "geo_bounding_box": {
+            "top_left": {
+              "lon": 13.0,
+              "lat": 53.0
+            },
+            "bottom_right": {
+              "lon": 14.0,
+              "lat": 52.0
+            }
+          }
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, GeoBoundingBox, GeoPoint
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            FieldCondition(
+                key="location",
+                geo_bounding_box=GeoBoundingBox(
+                    top_left=GeoPoint(lon=13.0, lat=53.0),
+                    bottom_right=GeoPoint(lon=14.0, lat=52.0)
+                )
+            )
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+## Combining Multiple Conditions
+
+### AND Logic (must)
+
+All conditions must be satisfied.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "key": "country",
+          "match": {"value": "Germany"}
+        },
+        {
+          "key": "population",
+          "range": {"gte": 1000000}
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            FieldCondition(key="country", match=MatchValue(value="Germany")),
+            FieldCondition(key="population", range=Range(gte=1000000))
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+### OR Logic (should)
+
+At least one condition must be satisfied.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "should": [
+        {
+          "key": "city",
+          "match": {"value": "Berlin"}
+        },
+        {
+          "key": "city",
+          "match": {"value": "Munich"}
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        should=[
+            FieldCondition(key="city", match=MatchValue(value="Berlin")),
+            FieldCondition(key="city", match=MatchValue(value="Munich"))
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+### NOT Logic (must_not)
+
+Exclude points that match these conditions.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must_not": [
+        {
+          "key": "country",
+          "match": {"value": "Germany"}
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must_not=[
+            FieldCondition(key="country", match=MatchValue(value="Germany"))
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+## Advanced Filter Conditions
+
+### Check if Field is Empty
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "is_empty": {
+            "key": "tags"
+          }
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, IsEmptyCondition
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            IsEmptyCondition(is_empty=PayloadField(key="tags"))
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+### Check if Field is Null
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "is_null": {
+            "key": "description"
+          }
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, IsNullCondition
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            IsNullCondition(is_null=PayloadField(key="description"))
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+### Filter by Point IDs
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "has_id": [1, 2, 3, 5, 8]
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, HasIdCondition
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            HasIdCondition(has_id=[1, 2, 3, 5, 8])
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+## Nested Filters
+
+Filter on nested object properties using dot notation.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "key": "metadata.author.name",
+          "match": {"value": "John Doe"}
+        }
+      ]
+    },
+    "limit": 10
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            FieldCondition(
+                key="metadata.author.name",
+                match=MatchValue(value="John Doe")
+            )
+        ]
+    ),
+    limit=10
+)
+```
+
+</CodeGroup>
+
+## Complex Filter Example
+
+Combine multiple filter types for complex queries.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vector": [0.2, 0.1, 0.9, 0.7],
+    "filter": {
+      "must": [
+        {
+          "key": "country",
+          "match": {"any": ["Germany", "France"]}
+        },
+        {
+          "key": "population",
+          "range": {"gte": 500000, "lt": 2000000}
+        }
+      ],
+      "must_not": [
+        {
+          "key": "city",
+          "match": {"value": "Frankfurt"}
+        }
+      ]
+    },
+    "limit": 10,
+    "score_threshold": 0.7
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchAny, MatchValue, Range
+
+client = QdrantClient(url="http://localhost:6333")
+
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    query_filter=Filter(
+        must=[
+            FieldCondition(
+                key="country",
+                match=MatchAny(any=["Germany", "France"])
+            ),
+            FieldCondition(
+                key="population",
+                range=Range(gte=500000, lt=2000000)
+            )
+        ],
+        must_not=[
+            FieldCondition(
+                key="city",
+                match=MatchValue(value="Frankfurt")
+            )
+        ]
+    ),
+    limit=10,
+    score_threshold=0.7
+)
+```
+
+</CodeGroup>
+
+<Warning>
+  Filters are applied before vector search. Complex filters with many conditions may impact performance on large collections.
+</Warning>
+
+## Best Practices
+
+1. **Index Payload Fields**: Create payload indexes for fields used frequently in filters
+2. **Simple Conditions**: Use simple conditions when possible for better performance
+3. **Field Types**: Match filter types with payload field types (string, integer, geo, etc.)
+4. **Combine Wisely**: Balance between filter specificity and search performance
+5. **Test Performance**: Profile complex filters on your dataset to ensure acceptable performance

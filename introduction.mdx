@@ -1,0 +1,239 @@
+---
+title: Introduction to Qdrant
+description: Qdrant is a high-performance vector search engine and database written in Rust, designed for production-ready semantic search, recommendations, and RAG applications.
+---
+
+# Introduction to Qdrant
+
+Qdrant (read: _quadrant_) is a **vector similarity search engine and vector database** that provides a production-ready service with a convenient API to store, search, and manage points—vectors with additional payload data.
+
+<Note>
+Qdrant is written in **Rust** 🦀, which makes it fast and reliable even under high load. See [benchmarks](https://qdrant.tech/benchmarks/) for performance comparisons.
+</Note>
+
+## What is Qdrant?
+
+Qdrant is designed to turn embeddings or neural network encoders into full-fledged applications for matching, searching, recommending, and much more. It provides extended filtering support, making it useful for all sorts of neural-network or semantic-based matching, faceted search, and other advanced applications.
+
+### Key Features
+
+<CardGroup cols={2}>
+  <Card title="Filtering & Payloads" icon="filter">
+    Attach JSON payloads to vectors and filter based on values, including keyword matching, full-text filtering, numerical ranges, and geo-locations.
+  </Card>
+  
+  <Card title="Hybrid Search" icon="magnifying-glass">
+    Support for both dense and sparse vectors to combine semantic search with keyword-based matching (BM25/TF-IDF style).
+  </Card>
+  
+  <Card title="Vector Quantization" icon="compress">
+    Reduce RAM usage by up to 97% with built-in vector quantization while maintaining search quality.
+  </Card>
+  
+  <Card title="Distributed Deployment" icon="network-wired">
+    Horizontal scaling through sharding and replication with zero-downtime rolling updates.
+  </Card>
+</CardGroup>
+
+## Core Capabilities
+
+### High-Performance Architecture
+
+Qdrant leverages modern hardware and software optimizations:
+
+- **SIMD Hardware Acceleration**: Utilizes x86-x64 and ARM Neon architectures for better performance
+- **Async I/O**: Uses `io_uring` on Linux to maximize disk throughput, even on network-attached storage
+- **Write-Ahead Logging (WAL)**: Ensures data persistence with update confirmation, protecting against power outages
+- **Query Planning**: Leverages payload indexes to optimize query execution strategies
+
+<Info>
+The default WAL capacity is **32 MB** per segment with configurable segments ahead for optimal write performance.
+</Info>
+
+### Storage & Memory Management
+
+Qdrant offers flexible storage options configured in `config/config.yaml`:
+
+```yaml
+storage:
+  # Where to store all the data
+  storage_path: ./storage
+  
+  # Where to store snapshots
+  snapshots_path: ./snapshots
+  
+  # If true - point payloads will not be stored in memory
+  on_disk_payload: true
+  
+  # Write-ahead-log configuration
+  wal:
+    wal_capacity_mb: 32
+    wal_segments_ahead: 0
+```
+
+### HNSW Index Configuration
+
+The Hierarchical Navigable Small World (HNSW) algorithm powers Qdrant's fast approximate nearest neighbor search:
+
+```yaml
+hnsw_index:
+  # Number of edges per node (higher = more accurate, more space)
+  m: 16
+  
+  # Number of neighbors during index building (higher = more accurate, slower build)
+  ef_construct: 100
+  
+  # Threshold for full-scan vs HNSW (in KiloBytes)
+  full_scan_threshold_kb: 10000
+  
+  # Store index on disk or in RAM
+  on_disk: false
+```
+
+## Use Cases
+
+### Semantic Search
+
+Transform text embeddings into powerful search capabilities that understand meaning, not just keywords. Perfect for document search, knowledge bases, and content discovery.
+
+### Recommendation Systems
+
+Build sophisticated recommendation engines by finding similar items based on user preferences, product attributes, or behavioral patterns.
+
+### Retrieval Augmented Generation (RAG)
+
+Power AI applications by retrieving relevant context from vector databases to enhance LLM responses with accurate, domain-specific information.
+
+<Accordion title="RAG Integration Example">
+Qdrant integrates seamlessly with popular RAG frameworks:
+
+- **LangChain**: Use Qdrant as a memory backend
+- **LlamaIndex**: Vector store integration for document indexing
+- **OpenAI ChatGPT**: Retrieval plugin for context enhancement
+- **Microsoft Semantic Kernel**: Persistent memory integration
+</Accordion>
+
+### Additional Applications
+
+- **Chat Bots**: Context-aware conversational AI with memory
+- **Matching Engines**: Find similar users, products, or content
+- **Anomaly Detection**: Identify outliers in high-dimensional data
+- **Image Search**: Visual similarity search for photos and media
+- **Extreme Classification**: Multi-class, multi-label problems with millions of labels
+
+## Architecture Overview
+
+### Core Components
+
+<Steps>
+  <Step title="Collections">
+    Named sets of points (vectors with payloads) that share the same vector configuration and indexing parameters.
+  </Step>
+  
+  <Step title="Points">
+    Individual entries consisting of a vector, unique ID, and optional JSON payload for metadata and filtering.
+  </Step>
+  
+  <Step title="Segments">
+    Internal data structures that optimize storage and search. Qdrant automatically manages segment optimization.
+  </Step>
+  
+  <Step title="Shards">
+    Horizontal partitions of collections enabling distributed deployment and scaling.
+  </Step>
+</Steps>
+
+### Distance Metrics
+
+Qdrant supports multiple distance metrics for vector similarity:
+
+- **Dot Product**: Best for normalized vectors (cosine similarity)
+- **Cosine**: Measures angle between vectors
+- **Euclidean**: L2 distance for spatial proximity
+- **Manhattan**: L1 distance for specific use cases
+
+## API Interfaces
+
+### REST API
+
+Full-featured HTTP API with OpenAPI 3.0 specification:
+
+- **Port**: 6333 (default)
+- **Documentation**: [https://api.qdrant.tech/](https://api.qdrant.tech/)
+- **Format**: JSON request/response
+
+### gRPC API
+
+High-performance binary protocol for production workloads:
+
+- **Port**: 6334 (default, optional)
+- **Use Case**: Faster searches with lower latency
+- **Features**: Streaming support, efficient serialization
+
+<Warning>
+By default, Qdrant starts without authentication. Always enable `api_key` in production and use TLS encryption.
+</Warning>
+
+## Integrations
+
+Qdrant integrates with the most popular AI and ML frameworks:
+
+- **Cohere**: Embeddings integration
+- **Haystack**: Document store backend
+- **LangChain**: Vector memory backend
+- **LlamaIndex**: Vector store integration
+- **OpenAI**: ChatGPT retrieval plugin
+- **Microsoft Semantic Kernel**: Persistent memory
+
+## Getting Started
+
+The fastest way to get started with Qdrant is using Docker:
+
+```bash
+docker run -p 6333:6333 qdrant/qdrant
+```
+
+Then connect with any client library:
+
+```python
+from qdrant_client import QdrantClient
+
+qdrant = QdrantClient("http://localhost:6333")
+```
+
+<Tip>
+For local development and testing, the Python client offers an in-memory mode: `QdrantClient(":memory:")` or file-based mode: `QdrantClient(path="path/to/db")`.
+</Tip>
+
+## Official Client Libraries
+
+Qdrant provides official client libraries for multiple programming languages:
+
+- [Python](https://github.com/qdrant/qdrant-client)
+- [JavaScript/TypeScript](https://github.com/qdrant/qdrant-js)
+- [Rust](https://github.com/qdrant/rust-client)
+- [Go](https://github.com/qdrant/go-client)
+- [.NET/C#](https://github.com/qdrant/qdrant-dotnet)
+- [Java](https://github.com/qdrant/java-client)
+
+Community clients are also available for Elixir, PHP, Ruby, and more.
+
+## Cloud Deployment
+
+Qdrant is available as a fully managed cloud service at [Qdrant Cloud](https://cloud.qdrant.io/), including a **free tier** for development and testing.
+
+## License
+
+Qdrant is open-source software licensed under the Apache License, Version 2.0.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get Qdrant running in minutes with a practical example
+  </Card>
+  
+  <Card title="Installation" icon="download" href="/installation">
+    Explore all installation methods and deployment options
+  </Card>
+</CardGroup>

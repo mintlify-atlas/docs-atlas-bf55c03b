@@ -1,0 +1,546 @@
+---
+title: Security Configuration
+description: Secure your Qdrant deployment with API key authentication, TLS/SSL encryption, and network security best practices
+---
+
+Qdrant provides multiple security layers including API key authentication, TLS/SSL encryption, JWT-based RBAC, and audit logging to protect your vector database.
+
+## API Key Authentication
+
+Protect your Qdrant instance with API keys for authentication.
+
+### Standard API Key
+
+Set a full-access API key in your configuration:
+
+```yaml config/config.yaml
+service:
+  api_key: your_secret_api_key_here
+```
+
+Or use environment variables:
+
+```bash
+QDRANT__SERVICE__API_KEY=your_secret_api_key_here
+```
+
+With Docker:
+
+```bash
+docker run -p 6333:6333 \
+    -e QDRANT__SERVICE__API_KEY=your_secret_api_key_here \
+    qdrant/qdrant:latest
+```
+
+### Using the API Key
+
+Include the API key in the `api-key` header:
+
+```bash
+curl -X GET http://localhost:6333/collections \
+    -H 'api-key: your_secret_api_key_here'
+```
+
+<CodeGroup>
+
+```python Python
+from qdrant_client import QdrantClient
+
+client = QdrantClient(
+    url="http://localhost:6333",
+    api_key="your_secret_api_key_here"
+)
+
+collections = client.get_collections()
+```
+
+```javascript JavaScript
+import { QdrantClient } from '@qdrant/js-client-rest';
+
+const client = new QdrantClient({
+  url: 'http://localhost:6333',
+  apiKey: 'your_secret_api_key_here'
+});
+
+const collections = await client.getCollections();
+```
+
+```typescript TypeScript
+import { QdrantClient } from '@qdrant/js-client-rest';
+
+const client = new QdrantClient({
+  url: 'http://localhost:6333',
+  apiKey: 'your_secret_api_key_here'
+});
+
+const collections = await client.getCollections();
+```
+
+```go Go
+import "github.com/qdrant/go-client/qdrant"
+
+client, err := qdrant.NewClient(&qdrant.Config{
+    Host:   "localhost:6334",
+    APIKey: "your_secret_api_key_here",
+})
+```
+
+</CodeGroup>
+
+<Warning>
+Never send API keys over unencrypted connections. Always enable TLS when using API key authentication in production.
+</Warning>
+
+## Read-Only API Key
+
+Provide read-only access with a separate API key:
+
+```yaml config/config.yaml
+service:
+  api_key: your_secret_api_key_here
+  read_only_api_key: your_read_only_key_here
+```
+
+With environment variables:
+
+```bash
+QDRANT__SERVICE__API_KEY=your_secret_api_key_here
+QDRANT__SERVICE__READ_ONLY_API_KEY=your_read_only_key_here
+```
+
+### Read-Only Permissions
+
+The read-only API key allows:
+
+- ✅ Search and retrieval operations
+- ✅ Collection listing and info
+- ✅ Point retrieval
+- ✅ Scroll and batch retrieval
+- ❌ Creating or deleting collections
+- ❌ Inserting, updating, or deleting points
+- ❌ Creating snapshots
+
+### Using Read-Only Key
+
+```bash
+curl -X POST http://localhost:6333/collections/my_collection/points/search \
+    -H 'api-key: your_read_only_key_here' \
+    -H 'Content-Type: application/json' \
+    -d '{
+        "vector": [0.1, 0.2, 0.3, 0.4],
+        "limit": 10
+    }'
+```
+
+## JWT Role-Based Access Control (RBAC)
+
+For fine-grained access control, enable JWT-based RBAC:
+
+```yaml config/config.yaml
+service:
+  jwt_rbac: true
+```
+
+<Note>
+JWT RBAC allows you to generate tokens with specific permissions for different users or applications. Documentation for generating JWT tokens is available in the Qdrant documentation.
+</Note>
+
+## TLS/SSL Configuration
+
+Enable HTTPS and secure gRPC with TLS.
+
+### Generate Certificates
+
+For development, create self-signed certificates:
+
+```bash
+mkdir -p tls
+
+# Generate private key
+openssl genrsa -out tls/key.pem 2048
+
+# Generate certificate
+openssl req -new -x509 -key tls/key.pem -out tls/cert.pem -days 365 \
+    -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"
+
+# For cluster mode, create CA certificate
+openssl genrsa -out tls/ca-key.pem 2048
+openssl req -new -x509 -key tls/ca-key.pem -out tls/cacert.pem -days 365 \
+    -subj "/C=US/ST=State/L=City/O=Organization/CN=Qdrant-CA"
+```
+
+<Warning>
+For production, use certificates from a trusted Certificate Authority (CA) like Let's Encrypt.
+</Warning>
+
+### Enable TLS
+
+```yaml config/config.yaml
+service:
+  enable_tls: true
+  
+tls:
+  # Server certificate chain
+  cert: ./tls/cert.pem
+  
+  # Server private key
+  key: ./tls/key.pem
+  
+  # Certificate authority (for cluster mode)
+  ca_cert: ./tls/cacert.pem
+  
+  # Auto-reload certificate every hour
+  cert_ttl: 3600
+```
+
+### Docker with TLS
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -v $(pwd)/tls:/qdrant/tls:z \
+    -e QDRANT__SERVICE__ENABLE_TLS=true \
+    -e QDRANT__SERVICE__API_KEY=your_secret_key \
+    qdrant/qdrant:latest
+```
+
+### Connect with TLS
+
+```bash
+curl -k https://localhost:6333/collections \
+    -H 'api-key: your_secret_api_key_here'
+```
+
+<CodeGroup>
+
+```python Python
+from qdrant_client import QdrantClient
+
+client = QdrantClient(
+    url="https://localhost:6333",
+    api_key="your_secret_api_key_here",
+    https=True,
+    # For self-signed certificates
+    verify=False
+)
+```
+
+```javascript JavaScript
+import { QdrantClient } from '@qdrant/js-client-rest';
+
+const client = new QdrantClient({
+  url: 'https://localhost:6333',
+  apiKey: 'your_secret_api_key_here',
+  https: true
+});
+```
+
+</CodeGroup>
+
+### Client Certificate Verification
+
+Require clients to present valid certificates:
+
+```yaml config/config.yaml
+service:
+  enable_tls: true
+  verify_https_client_certificate: true
+  
+tls:
+  cert: ./tls/cert.pem
+  key: ./tls/key.pem
+  ca_cert: ./tls/cacert.pem
+```
+
+<Warning>
+Client certificate verification requires all clients to have certificates signed by the CA specified in `ca_cert`.
+</Warning>
+
+## Cluster Security
+
+### TLS for Inter-Node Communication
+
+Secure communication between cluster nodes:
+
+```yaml config/config.yaml
+cluster:
+  enabled: true
+  p2p:
+    port: 6335
+    enable_tls: true
+
+tls:
+  cert: ./tls/cert.pem
+  key: ./tls/key.pem
+  ca_cert: ./tls/cacert.pem
+```
+
+<Warning>
+All nodes in the cluster must have `enable_tls` set consistently. Mixed TLS/non-TLS configurations are not supported.
+</Warning>
+
+### Docker Compose Cluster with TLS
+
+```yaml docker-compose.yml
+version: '3.7'
+
+services:
+  qdrant_node_1:
+    image: qdrant/qdrant:latest
+    environment:
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__P2P__PORT=6335
+      - QDRANT__CLUSTER__P2P__ENABLE_TLS=true
+      - QDRANT__SERVICE__ENABLE_TLS=true
+      - QDRANT__SERVICE__API_KEY=cluster_secret_key
+    volumes:
+      - ./tls:/qdrant/tls:z
+      - ./node1_storage:/qdrant/storage:z
+    command: ./qdrant --uri 'https://qdrant_node_1:6335'
+```
+
+## Network Security
+
+### Bind to Specific Interface
+
+Restrict Qdrant to specific network interfaces:
+
+```yaml config/config.yaml
+service:
+  # Bind only to localhost (no external access)
+  host: 127.0.0.1
+  
+  # Or bind to specific internal IP
+  host: 192.168.1.100
+```
+
+### Firewall Rules
+
+Configure firewall to restrict access:
+
+```bash
+# Allow HTTP/HTTPS from specific network
+sudo ufw allow from 192.168.1.0/24 to any port 6333
+
+# Allow gRPC from specific network
+sudo ufw allow from 192.168.1.0/24 to any port 6334
+
+# For cluster mode, allow P2P between nodes
+sudo ufw allow from 192.168.1.10 to any port 6335
+sudo ufw allow from 192.168.1.11 to any port 6335
+```
+
+### Kubernetes Network Policies
+
+Restrict pod-to-pod communication:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: qdrant-network-policy
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: qdrant
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from application pods
+  - from:
+    - podSelector:
+        matchLabels:
+          app: my-application
+    ports:
+    - protocol: TCP
+      port: 6333
+  # Allow P2P from other Qdrant nodes
+  - from:
+    - podSelector:
+        matchLabels:
+          app: qdrant
+    ports:
+    - protocol: TCP
+      port: 6335
+  egress:
+  # Allow to other Qdrant nodes
+  - to:
+    - podSelector:
+        matchLabels:
+          app: qdrant
+    ports:
+    - protocol: TCP
+      port: 6335
+```
+
+## Audit Logging
+
+Track all API access with audit logs:
+
+```yaml config/config.yaml
+audit:
+  enabled: true
+  dir: ./storage/audit
+  rotation: daily
+  max_log_files: 7
+  
+  # Only enable if behind trusted proxy/load balancer
+  trust_forwarded_headers: false
+```
+
+### Audit Log Format
+
+Audit logs are written as structured JSON:
+
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123Z",
+  "client_ip": "192.168.1.100",
+  "method": "POST",
+  "path": "/collections/my_collection/points/search",
+  "status": 200,
+  "user_agent": "qdrant-client/1.0.0",
+  "duration_ms": 45
+}
+```
+
+### Behind a Reverse Proxy
+
+When running behind nginx or a load balancer:
+
+```yaml config/config.yaml
+audit:
+  enabled: true
+  # Trust X-Forwarded-For header for real client IP
+  trust_forwarded_headers: true
+```
+
+<Warning>
+Only enable `trust_forwarded_headers` when Qdrant is behind a trusted reverse proxy. Otherwise, clients can spoof their IP addresses.
+</Warning>
+
+## Kubernetes Secrets
+
+Store sensitive configuration in Kubernetes Secrets:
+
+```bash
+kubectl create secret generic qdrant-secrets \
+  --from-literal=api-key=your_secret_api_key_here \
+  --from-literal=read-only-api-key=your_read_only_key_here \
+  --from-file=tls-cert=./tls/cert.pem \
+  --from-file=tls-key=./tls/key.pem \
+  --from-file=tls-ca=./tls/cacert.pem
+```
+
+Reference in your deployment:
+
+```yaml
+env:
+- name: QDRANT__SERVICE__API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: qdrant-secrets
+      key: api-key
+
+volumeMounts:
+- name: tls-certs
+  mountPath: /qdrant/tls
+  readOnly: true
+
+volumes:
+- name: tls-certs
+  secret:
+    secretName: qdrant-secrets
+    items:
+    - key: tls-cert
+      path: cert.pem
+    - key: tls-key
+      path: key.pem
+    - key: tls-ca
+      path: cacert.pem
+```
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always Use TLS in Production">
+    Enable TLS for all external connections. Never transmit API keys over unencrypted HTTP in production environments.
+  </Accordion>
+  
+  <Accordion title="Rotate API Keys Regularly">
+    Change API keys periodically and immediately if you suspect compromise. Use different keys for different environments.
+  </Accordion>
+  
+  <Accordion title="Use Read-Only Keys for Analytics">
+    Provide read-only API keys to analytics tools and dashboards to minimize risk.
+  </Accordion>
+  
+  <Accordion title="Restrict Network Access">
+    Use firewalls and network policies to limit which hosts can connect to Qdrant. Bind to specific interfaces when possible.
+  </Accordion>
+  
+  <Accordion title="Enable Audit Logging">
+    Track all API access for security monitoring and compliance requirements.
+  </Accordion>
+  
+  <Accordion title="Keep Qdrant Updated">
+    Regularly update to the latest Qdrant version to receive security patches and improvements.
+  </Accordion>
+  
+  <Accordion title="Secure the Host System">
+    Harden the operating system, keep it patched, and follow security best practices for the infrastructure running Qdrant.
+  </Accordion>
+  
+  <Accordion title="Use Strong Secrets">
+    Generate strong, random API keys. Use a password manager or secrets management system.
+  </Accordion>
+</AccordionGroup>
+
+## Security Checklist
+
+<Steps>
+  <Step title="Generate Strong API Keys">
+    Create random, complex API keys:
+    ```bash
+    openssl rand -base64 32
+    ```
+  </Step>
+  
+  <Step title="Enable TLS/SSL">
+    Configure TLS with valid certificates for all external connections.
+  </Step>
+  
+  <Step title="Configure Firewall">
+    Restrict network access to only trusted sources.
+  </Step>
+  
+  <Step title="Enable Audit Logging">
+    Track all API access for security monitoring.
+  </Step>
+  
+  <Step title="Secure Inter-Node Communication">
+    Enable TLS for cluster P2P communication.
+  </Step>
+  
+  <Step title="Regular Updates">
+    Keep Qdrant and dependencies up to date.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Complete configuration reference
+  </Card>
+  <Card title="Distributed Mode" icon="network-wired" href="/deployment/distributed">
+    Secure cluster deployments
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
+    Kubernetes security patterns
+  </Card>
+  <Card title="Docker" icon="docker" href="/deployment/docker">
+    Docker security best practices
+  </Card>
+</CardGroup>

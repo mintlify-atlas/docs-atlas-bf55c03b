@@ -1,80 +1,435 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start Guide
+description: Get started with Qdrant in minutes. Learn how to run Qdrant with Docker, create your first collection, insert vectors, and perform similarity search.
 ---
 
-## Get started in three steps
+# Quick Start
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide covers the most basic use-case: running Qdrant, creating a collection, inserting vectors with payloads, and performing vector search with filtering.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+For additional information, refer to the [API documentation](https://api.qdrant.tech/).
 </Note>
+
+## Run Qdrant with Docker
+
+<Steps>
+  <Step title="Pull the latest image">
+    Download the latest Qdrant image from DockerHub:
+
+    ```bash
+    docker pull qdrant/qdrant
+    ```
+  </Step>
+  
+  <Step title="Run the container">
+    Start Qdrant with default configuration:
+
+    ```bash
+    docker run -p 6333:6333 qdrant/qdrant
+    ```
+
+    <Warning>
+    This starts an **insecure deployment** without authentication, open to all network interfaces. For production, refer to [secure your instance](https://qdrant.tech/documentation/guides/security/#secure-your-instance).
+    </Warning>
+  </Step>
+  
+  <Step title="Verify Qdrant is running">
+    Qdrant should now be accessible at [http://localhost:6333](http://localhost:6333).
+
+    You can check the health status:
+
+    ```bash
+    curl http://localhost:6333/
+    ```
+  </Step>
+</Steps>
+
+## Production Docker Setup
+
+For a production-ready setup with persistent storage and custom configuration:
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -v $(pwd)/qdrant_storage:/qdrant/storage \
+    -v $(pwd)/qdrant_snapshots:/qdrant/snapshots \
+    -v $(pwd)/config/production.yaml:/qdrant/config/production.yaml \
+    qdrant/qdrant
+```
+
+<Accordion title="Understanding the volume mounts">
+- `/qdrant/storage` - Where Qdrant persists all your data (mount as volume to prevent data loss)
+- `/qdrant/snapshots` - Where Qdrant stores collection snapshots for backup/restore
+- `/qdrant/config/production.yaml` - Custom configuration file (override values from the reference config)
+</Accordion>
+
+<Info>
+For production deployments, set `service.api_key` in your configuration file to enable authentication.
+</Info>
+
+## Create a Collection
+
+Collections are named sets of points (vectors with payloads) that share the same configuration.
+
+Create a collection with **4-dimensional vectors** using **Dot product** metric:
+
+```bash
+curl -X PUT 'http://localhost:6333/collections/test_collection' \
+    -H 'Content-Type: application/json' \
+    --data-raw '{
+        "vectors": {
+          "size": 4,
+          "distance": "Dot"
+        }
+    }'
+```
+
+**Expected response:**
+
+```json
+{
+  "result": true,
+  "status": "ok",
+  "time": 0.031095451
+}
+```
+
+### Verify Collection Creation
+
+Check that your collection was created successfully:
+
+```bash
+curl 'http://localhost:6333/collections/test_collection'
+```
+
+**Expected response:**
+
+```json
+{
+  "result": {
+    "status": "green",
+    "vectors_count": 0,
+    "segments_count": 5,
+    "disk_data_size": 0,
+    "ram_data_size": 0,
+    "config": {
+      "params": {
+        "vectors": {
+          "size": 4,
+          "distance": "Dot"
+        }
+      },
+      "hnsw_config": {
+        "m": 16,
+        "ef_construct": 100,
+        "full_scan_threshold": 10000
+      },
+      "optimizer_config": {
+        "deleted_threshold": 0.2,
+        "vacuum_min_vector_number": 1000,
+        "default_segment_number": 2,
+        "max_segment_size": null,
+        "memmap_threshold": null,
+        "indexing_threshold": 20000,
+        "flush_interval_sec": 5,
+        "max_optimization_threads": null
+      },
+      "wal_config": {
+        "wal_capacity_mb": 32,
+        "wal_segments_ahead": 0
+      }
+    }
+  },
+  "status": "ok",
+  "time": 2.1199e-5
+}
+```
+
+<Tip>
+Note the HNSW configuration with `m: 16` (edges per node) and `ef_construct: 100` (neighbors during build). These values balance accuracy and performance.
+</Tip>
+
+## Insert Points
+
+Points consist of a vector, unique ID, and optional payload. Let's insert 6 points with city information:
+
+```bash
+curl -L -X PUT 'http://localhost:6333/collections/test_collection/points?wait=true' \
+    -H 'Content-Type: application/json' \
+    --data-raw '{
+        "points": [
+          {"id": 1, "vector": [0.05, 0.61, 0.76, 0.74], "payload": {"city": "Berlin"}},
+          {"id": 2, "vector": [0.19, 0.81, 0.75, 0.11], "payload": {"city": ["Berlin", "London"]}},
+          {"id": 3, "vector": [0.36, 0.55, 0.47, 0.94], "payload": {"city": ["Berlin", "Moscow"]}},
+          {"id": 4, "vector": [0.18, 0.01, 0.85, 0.80], "payload": {"city": ["London", "Moscow"]}},
+          {"id": 5, "vector": [0.24, 0.18, 0.22, 0.44], "payload": {"count": [0]}},
+          {"id": 6, "vector": [0.35, 0.08, 0.11, 0.44]}
+        ]
+    }'
+```
+
+**Expected response:**
+
+```json
+{
+  "result": {
+    "operation_id": 0,
+    "status": "completed"
+  },
+  "status": "ok",
+  "time": 0.000206061
+}
+```
+
+<Info>
+The `?wait=true` parameter ensures the operation completes before returning. Without it, the operation is asynchronous.
+</Info>
+
+### Understanding Payloads
+
+- **Point 1**: Simple payload with single city value
+- **Points 2-4**: Array payloads supporting multiple values
+- **Point 5**: Different payload structure (demonstrates flexibility)
+- **Point 6**: No payload (payloads are optional)
+
+## Search Vectors
+
+### Basic Search
+
+Search for the top 3 most similar vectors:
+
+```bash
+curl -L -X POST 'http://localhost:6333/collections/test_collection/points/search' \
+    -H 'Content-Type: application/json' \
+    --data-raw '{
+        "vector": [0.2, 0.1, 0.9, 0.7],
+        "top": 3
+    }'
+```
+
+**Expected response:**
+
+```json
+{
+  "result": [
+    { "id": 4, "score": 1.362, "payload": null, "version": 0 },
+    { "id": 1, "score": 1.273, "payload": null, "version": 0 },
+    { "id": 3, "score": 1.208, "payload": null, "version": 0 }
+  ],
+  "status": "ok",
+  "time": 0.000055785
+}
+```
+
+<Note>
+With Dot product distance, **higher scores** indicate greater similarity. The query completed in ~55 microseconds!
+</Note>
+
+### Search with Filtering
+
+Now let's search for vectors but **only from points with "London" in their city payload**:
+
+```bash
+curl -L -X POST 'http://localhost:6333/collections/test_collection/points/search' \
+    -H 'Content-Type: application/json' \
+    --data-raw '{
+      "filter": {
+          "should": [
+              {
+                  "key": "city",
+                  "match": {
+                      "value": "London"
+                  }
+              }
+          ]
+      },
+      "vector": [0.2, 0.1, 0.9, 0.7],
+      "top": 3
+  }'
+```
+
+**Expected response:**
+
+```json
+{
+  "result": [
+    { "id": 4, "score": 1.362 },
+    { "id": 2, "score": 0.871 }
+  ],
+  "status": "ok",
+  "time": 0.000093972
+}
+```
+
+<Tip>
+Only points 2 and 4 are returned because they have "London" in their city payload. The filter was applied before similarity search!
+</Tip>
+
+## Filter Conditions
+
+Qdrant supports powerful filtering with multiple conditions:
+
+<CodeGroup>
+```json Match Value
+{
+  "filter": {
+    "must": [
+      {
+        "key": "city",
+        "match": {
+          "value": "Berlin"
+        }
+      }
+    ]
+  }
+}
+```
+
+```json Range Filter
+{
+  "filter": {
+    "must": [
+      {
+        "key": "price",
+        "range": {
+          "gte": 100,
+          "lte": 500
+        }
+      }
+    ]
+  }
+}
+```
+
+```json Combined Conditions
+{
+  "filter": {
+    "must": [
+      {"key": "city", "match": {"value": "Berlin"}}
+    ],
+    "must_not": [
+      {"key": "price", "range": {"gte": 1000}}
+    ],
+    "should": [
+      {"key": "category", "match": {"value": "premium"}}
+    ]
+  }
+}
+```
+</CodeGroup>
+
+## Using Client Libraries
+
+While the examples above use curl, it's recommended to use official client libraries for production applications.
+
+### Python Client
+
+```python
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+
+# Connect to Qdrant
+client = QdrantClient("http://localhost:6333")
+
+# Create collection
+client.create_collection(
+    collection_name="test_collection",
+    vectors_config=VectorParams(size=4, distance=Distance.DOT),
+)
+
+# Insert points
+client.upsert(
+    collection_name="test_collection",
+    points=[
+        PointStruct(id=1, vector=[0.05, 0.61, 0.76, 0.74], payload={"city": "Berlin"}),
+        PointStruct(id=2, vector=[0.19, 0.81, 0.75, 0.11], payload={"city": ["Berlin", "London"]}),
+        # ... more points
+    ],
+)
+
+# Search
+results = client.search(
+    collection_name="test_collection",
+    query_vector=[0.2, 0.1, 0.9, 0.7],
+    limit=3,
+)
+```
+
+### JavaScript/TypeScript Client
+
+```javascript
+import { QdrantClient } from '@qdrant/js-client-rest';
+
+const client = new QdrantClient({ url: 'http://localhost:6333' });
+
+// Create collection
+await client.createCollection('test_collection', {
+  vectors: { size: 4, distance: 'Dot' },
+});
+
+// Insert points
+await client.upsert('test_collection', {
+  points: [
+    { id: 1, vector: [0.05, 0.61, 0.76, 0.74], payload: { city: 'Berlin' } },
+    { id: 2, vector: [0.19, 0.81, 0.75, 0.11], payload: { city: ['Berlin', 'London'] } },
+    // ... more points
+  ],
+});
+
+// Search
+const results = await client.search('test_collection', {
+  vector: [0.2, 0.1, 0.9, 0.7],
+  limit: 3,
+});
+```
+
+## Local Development Options
+
+For quick prototyping without Docker:
+
+<CodeGroup>
+```python In-Memory Mode
+from qdrant_client import QdrantClient
+
+# Creates an in-memory instance (no persistence)
+client = QdrantClient(":memory:")
+```
+
+```python File-Based Mode
+from qdrant_client import QdrantClient
+
+# Persists data to local disk
+client = QdrantClient(path="path/to/db")
+```
+</CodeGroup>
+
+<Warning>
+In-memory mode is great for testing and CI/CD but **data is lost** when the process ends.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation Guide" icon="download" href="/installation">
+    Explore production deployment options including Kubernetes and cloud
+  </Card>
+  
+  <Card title="API Documentation" icon="code" href="https://api.qdrant.tech/">
+    Complete REST API reference with all endpoints
+  </Card>
+  
+  <Card title="Collections" icon="layer-group">
+    Learn about collection configuration, vector types, and indexing
+  </Card>
+  
+  <Card title="Filtering" icon="filter">
+    Master advanced filtering with full-text search, geo-queries, and more
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+- [End-to-End Colab Notebook](https://colab.research.google.com/drive/1Bz8RSVHwnNDaNtDwotfPj0w7AYzsdXZ-?usp=sharing) - Demo with SentenceBERT
+- [Step-by-Step Tutorial](https://qdrant.to/qdrant-tutorial) - Create your first neural network project
+- [Semantic Search Demo](https://qdrant.to/semantic-search-demo) - Try it online
+- [Food Discovery Demo](https://qdrant.to/food-discovery) - Visual search example

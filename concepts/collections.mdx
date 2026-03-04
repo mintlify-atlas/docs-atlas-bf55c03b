@@ -1,0 +1,286 @@
+---
+title: Collections
+description: Understanding collections in Qdrant - the primary organizational unit for storing and managing vector data
+---
+
+A **collection** is the fundamental organizational unit in Qdrant. It serves as a named container for storing points (vectors with associated payloads) that share the same vector configuration.
+
+## What is a Collection?
+
+A collection defines:
+
+- **Vector configuration**: Dimensionality, distance metrics, and storage settings
+- **Indexing strategy**: How vectors are indexed for efficient search
+- **Payload schema**: Structure and indexes for associated metadata
+- **Optimization settings**: How the collection is optimized over time
+
+Think of a collection as a table in a traditional database, but optimized for vector similarity search.
+
+## Vector Configuration
+
+Each collection must specify its vector configuration. Qdrant supports multiple vector types within a single collection.
+
+### Single Vector Configuration
+
+For collections with one vector per point:
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", port=6333)
+
+client.create_collection(
+    collection_name="my_collection",
+    vectors_config=models.VectorParams(
+        size=384,  # Vector dimensionality
+        distance=models.Distance.COSINE
+    )
+)
+```
+
+```typescript
+import { QdrantClient } from "@qdrant/js-client-rest";
+
+const client = new QdrantClient({ url: "http://localhost:6333" });
+
+await client.createCollection("my_collection", {
+  vectors: {
+    size: 384,
+    distance: "Cosine"
+  }
+});
+```
+
+```bash
+curl -X PUT http://localhost:6333/collections/my_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 384,
+      "distance": "Cosine"
+    }
+  }'
+```
+
+### Named Vectors Configuration
+
+For collections with multiple vectors per point:
+
+```python
+client.create_collection(
+    collection_name="multi_vector_collection",
+    vectors_config={
+        "image": models.VectorParams(
+            size=512,
+            distance=models.Distance.COSINE
+        ),
+        "text": models.VectorParams(
+            size=384,
+            distance=models.Distance.DOT
+        )
+    }
+)
+```
+
+<Info>
+Named vectors allow you to store different types of embeddings for the same point, such as image and text embeddings for multimodal search.
+</Info>
+
+## Distance Metrics Configuration
+
+Qdrant supports multiple distance metrics. The choice depends on your embedding model and use case:
+
+```rust
+// From lib/segment/src/types.rs:306-315
+pub enum Distance {
+    Cosine,     // Cosine similarity
+    Euclid,     // Euclidean distance
+    Dot,        // Dot product
+    Manhattan,  // Manhattan distance
+}
+```
+
+- **Cosine**: Normalized similarity, values from -1 to 1 (higher is better)
+- **Euclidean**: L2 distance, values from 0 to ∞ (lower is better)
+- **Dot Product**: Raw dot product, unbounded (higher is better)
+- **Manhattan**: L1 distance, values from 0 to ∞ (lower is better)
+
+<Tip>
+Most modern embedding models (OpenAI, Cohere, etc.) are optimized for cosine similarity.
+</Tip>
+
+## Vector Storage Types
+
+Control where vectors are stored for optimal performance:
+
+```rust
+// From lib/segment/src/types.rs:1492-1513
+pub enum VectorStorageType {
+    Memory,              // In RAM - fastest
+    Mmap,                // Memory-mapped file
+    ChunkedMmap,         // Chunked memory-mapped, appendable
+    InRamChunkedMmap,    // Locked in RAM, no disk access
+    InRamMmap,           // Pre-fetched into RAM on load
+}
+```
+
+```python
+client.create_collection(
+    collection_name="fast_collection",
+    vectors_config=models.VectorParams(
+        size=768,
+        distance=models.Distance.COSINE,
+        on_disk=False  # Store in RAM for best performance
+    )
+)
+```
+
+<Warning>
+Storing vectors on disk reduces memory usage but may increase search latency for cold requests.
+</Warning>
+
+## Collection Management
+
+### Creating a Collection
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", port=6333)
+
+client.create_collection(
+    collection_name="products",
+    vectors_config=models.VectorParams(
+        size=768,
+        distance=models.Distance.COSINE
+    ),
+    # Optional: HNSW index configuration
+    hnsw_config=models.HnswConfigDiff(
+        m=16,
+        ef_construct=100
+    ),
+    # Optional: Quantization for reduced memory usage
+    quantization_config=models.ScalarQuantization(
+        scalar=models.ScalarQuantizationConfig(
+            type=models.ScalarType.INT8,
+            quantile=0.99
+        )
+    )
+)
+```
+
+### Getting Collection Info
+
+```python
+info = client.get_collection("products")
+
+print(f"Points count: {info.points_count}")
+print(f"Vectors count: {info.vectors_count}")
+print(f"Status: {info.status}")
+```
+
+### Deleting a Collection
+
+```python
+client.delete_collection("products")
+```
+
+<Warning>
+Deleting a collection permanently removes all points and cannot be undone.
+</Warning>
+
+## Collection Status
+
+```rust
+// From lib/collection/src/operations/types.rs:66-78
+pub enum CollectionStatus {
+    Green,   // All good, ready for requests
+    Yellow,  // Available, optimization running
+    Grey,    // Available, optimization pending
+    Red,     // Some operations failed
+}
+```
+
+- **Green**: Collection is fully operational
+- **Yellow**: Collection is being optimized but available
+- **Grey**: Optimization is possible but not started
+- **Red**: Some operations failed and need recovery
+
+## Sparse Vectors
+
+Collections can also store sparse vectors for keyword-based or BM25-style search:
+
+```python
+client.create_collection(
+    collection_name="hybrid_search",
+    vectors_config=models.VectorParams(
+        size=384,
+        distance=models.Distance.COSINE
+    ),
+    sparse_vectors_config={
+        "text": models.SparseVectorParams()
+    }
+)
+```
+
+<Info>
+Sparse vectors are ideal for hybrid search combining semantic and keyword matching.
+</Info>
+
+## Multivector Support
+
+For advanced use cases, store multiple vectors per point:
+
+```python
+client.create_collection(
+    collection_name="multivec_collection",
+    vectors_config={
+        "image_patches": models.VectorParams(
+            size=512,
+            distance=models.Distance.COSINE,
+            multivector_config=models.MultiVectorConfig(
+                comparator=models.MultiVectorComparator.MAX_SIM
+            )
+        )
+    }
+)
+```
+
+<Tip>
+Multivectors are useful for ColBERT-style search where documents are split into multiple token-level embeddings.
+</Tip>
+
+## Best Practices
+
+<Accordion title="Choose the right distance metric">
+  Always use the distance metric your embedding model was trained with. Most models use cosine similarity.
+</Accordion>
+
+<Accordion title="Plan for scale">
+  For large collections (>1M vectors), consider using on-disk storage and quantization to reduce memory usage.
+</Accordion>
+
+<Accordion title="Use named vectors for multimodal data">
+  When working with multiple data types (text, images, audio), use named vectors to keep embeddings organized.
+</Accordion>
+
+<Accordion title="Monitor collection status">
+  Regularly check collection status to ensure optimizations are running and no errors have occurred.
+</Accordion>
+
+## Related Concepts
+
+<CardGroup cols={2}>
+  <Card title="Points" icon="circle-dot" href="/concepts/points">
+    Learn about points - the individual records stored in collections
+  </Card>
+  <Card title="Vectors" icon="chart-network" href="/concepts/vectors">
+    Understand vector types and configurations
+  </Card>
+  <Card title="Indexing" icon="layer-group" href="/concepts/indexing">
+    Explore indexing strategies for fast search
+  </Card>
+  <Card title="Distance Metrics" icon="ruler" href="/concepts/distance-metrics">
+    Deep dive into distance metrics and when to use each
+  </Card>
+</CardGroup>

@@ -1,0 +1,311 @@
+---
+title: Create Collection
+description: Learn how to create collections in Qdrant with various vector configurations including dense vectors, sparse vectors, and named vectors.
+---
+
+A collection is a named set of points (vectors with a payload) that you can search. Creating a collection is the first step before inserting data into Qdrant.
+
+## API Endpoint
+
+```
+PUT /collections/{collection_name}
+```
+
+## Create Collection with Dense Vectors
+
+<Steps>
+  <Step title="Define collection parameters">
+    Create a collection with a single dense vector configuration. This is the most common use case.
+  </Step>
+  
+  <Step title="Send the request">
+    Use the REST API or Python client to create the collection.
+  </Step>
+</Steps>
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/my_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 384,
+      "distance": "Cosine"
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_collection(
+    collection_name="my_collection",
+    vectors_config=VectorParams(
+        size=384,
+        distance=Distance.COSINE
+    )
+)
+```
+
+</CodeGroup>
+
+### Vector Configuration Parameters
+
+<ParamField path="vectors.size" type="integer" required>
+  Size of the vector (number of dimensions).
+</ParamField>
+
+<ParamField path="vectors.distance" type="string" required>
+  Distance metric for vector comparison. Available options:
+  - `Cosine` - Cosine similarity
+  - `Euclid` - Euclidean distance
+  - `Dot` - Dot product
+  - `Manhattan` - Manhattan distance
+</ParamField>
+
+<ParamField path="vectors.hnsw_config" type="object">
+  HNSW index configuration for fast approximate nearest neighbor search.
+</ParamField>
+
+<ParamField path="vectors.quantization_config" type="object">
+  Quantization configuration to reduce memory usage.
+</ParamField>
+
+<ParamField path="vectors.on_disk" type="boolean" default="false">
+  Store vectors on disk instead of RAM to save memory.
+</ParamField>
+
+## Create Collection with Named Vectors
+
+Use named vectors when you need multiple vector representations per point (e.g., text and image embeddings).
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/multi_vector_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "text": {
+        "size": 768,
+        "distance": "Cosine"
+      },
+      "image": {
+        "size": 512,
+        "distance": "Euclid"
+      }
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_collection(
+    collection_name="multi_vector_collection",
+    vectors_config={
+        "text": VectorParams(
+            size=768,
+            distance=Distance.COSINE
+        ),
+        "image": VectorParams(
+            size=512,
+            distance=Distance.EUCLID
+        )
+    }
+)
+```
+
+</CodeGroup>
+
+## Create Collection with Sparse Vectors
+
+Sparse vectors are useful for keyword-based search and can be combined with dense vectors for hybrid search.
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/sparse_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "dense": {
+        "size": 384,
+        "distance": "Cosine"
+      }
+    },
+    "sparse_vectors": {
+      "text": {}
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, SparseVectorParams
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_collection(
+    collection_name="sparse_collection",
+    vectors_config=VectorParams(
+        size=384,
+        distance=Distance.COSINE
+    ),
+    sparse_vectors_config={
+        "text": SparseVectorParams()
+    }
+)
+```
+
+</CodeGroup>
+
+## Additional Configuration Options
+
+### Optimizers Config
+
+Control how Qdrant optimizes storage and indexing.
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/optimized_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 384,
+      "distance": "Cosine"
+    },
+    "optimizers_config": {
+      "indexing_threshold": 20000,
+      "memmap_threshold": 50000
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, OptimizersConfigDiff
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_collection(
+    collection_name="optimized_collection",
+    vectors_config=VectorParams(
+        size=384,
+        distance=Distance.COSINE
+    ),
+    optimizers_config=OptimizersConfigDiff(
+        indexing_threshold=20000,
+        memmap_threshold=50000
+    )
+)
+```
+
+</CodeGroup>
+
+### Replication Factor
+
+For distributed deployments, specify how many replicas to create.
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/replicated_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 384,
+      "distance": "Cosine"
+    },
+    "replication_factor": 2,
+    "write_consistency_factor": 1
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_collection(
+    collection_name="replicated_collection",
+    vectors_config=VectorParams(
+        size=384,
+        distance=Distance.COSINE
+    ),
+    replication_factor=2,
+    write_consistency_factor=1
+)
+```
+
+</CodeGroup>
+
+<Note>
+  Replication factor must be less than or equal to the number of nodes in your cluster.
+</Note>
+
+## Response Format
+
+Successful collection creation returns:
+
+<ResponseField name="result" type="boolean">
+  Indicates whether the operation was successful.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Operation status, typically "ok" on success.
+</ResponseField>
+
+<ResponseField name="time" type="number">
+  Time taken to execute the operation in seconds.
+</ResponseField>
+
+```json Response Example
+{
+  "result": true,
+  "status": "ok",
+  "time": 0.031095
+}
+```
+
+## Query Parameters
+
+<ParamField query="timeout" type="integer">
+  Wait timeout in seconds for the operation to complete. If timeout is reached, the service will return an error.
+</ParamField>
+
+<Warning>
+  Collection names must be unique. Creating a collection with an existing name will return an error.
+</Warning>
+
+## Check if Collection Exists
+
+Before creating a collection, you can check if it already exists:
+
+```bash
+GET /collections/{collection_name}/exists
+```
+
+<CodeGroup>
+
+```bash REST API
+curl http://localhost:6333/collections/my_collection/exists
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+exists = client.collection_exists("my_collection")
+```
+
+</CodeGroup>

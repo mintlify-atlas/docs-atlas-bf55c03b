@@ -1,0 +1,443 @@
+---
+title: Collections Service
+description: gRPC API for creating, managing, and configuring Qdrant collections with vector parameters, sharding, and replication
+---
+
+## Overview
+
+The Collections service provides gRPC methods for managing collection lifecycle, configuration, and cluster operations.
+
+## Service Definition
+
+From `collections_service.proto:8-41`:
+
+```protobuf
+service Collections {
+  rpc Get(GetCollectionInfoRequest) returns (GetCollectionInfoResponse);
+  rpc List(ListCollectionsRequest) returns (ListCollectionsResponse);
+  rpc Create(CreateCollection) returns (CollectionOperationResponse);
+  rpc Update(UpdateCollection) returns (CollectionOperationResponse);
+  rpc Delete(DeleteCollection) returns (CollectionOperationResponse);
+  rpc UpdateAliases(ChangeAliases) returns (CollectionOperationResponse);
+  rpc ListCollectionAliases(ListCollectionAliasesRequest) returns (ListAliasesResponse);
+  rpc ListAliases(ListAliasesRequest) returns (ListAliasesResponse);
+  rpc CollectionClusterInfo(CollectionClusterInfoRequest) returns (CollectionClusterInfoResponse);
+  rpc CollectionExists(CollectionExistsRequest) returns (CollectionExistsResponse);
+  rpc UpdateCollectionClusterSetup(UpdateCollectionClusterSetupRequest) returns (UpdateCollectionClusterSetupResponse);
+  rpc CreateShardKey(CreateShardKeyRequest) returns (CreateShardKeyResponse);
+  rpc DeleteShardKey(DeleteShardKeyRequest) returns (DeleteShardKeyResponse);
+}
+```
+
+## Create Collection
+
+Create a new collection with vector configuration:
+
+### Python Example
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", grpc_port=6334, prefer_grpc=True)
+
+client.create_collection(
+    collection_name="my_collection",
+    vectors_config=models.VectorParams(
+        size=384,
+        distance=models.Distance.COSINE
+    ),
+    hnsw_config=models.HnswConfigDiff(
+        m=16,
+        ef_construct=100
+    ),
+    optimizers_config=models.OptimizersConfigDiff(
+        default_segment_number=2
+    ),
+    replication_factor=2,
+    write_consistency_factor=1,
+    on_disk_payload=False
+)
+```
+
+### Go Example
+
+```go
+import (
+    "context"
+    pb "github.com/qdrant/go-client/qdrant"
+)
+
+_, err := client.Create(context.Background(), &pb.CreateCollection{
+    CollectionName: "my_collection",
+    VectorsConfig: &pb.VectorsConfig{
+        Config: &pb.VectorsConfig_Params{
+            Params: &pb.VectorParams{
+                Size:     384,
+                Distance: pb.Distance_Cosine,
+            },
+        },
+    },
+    HnswConfig: &pb.HnswConfigDiff{
+        M:          ptrUint64(16),
+        EfConstruct: ptrUint64(100),
+    },
+    ReplicationFactor: ptrUint32(2),
+})
+```
+
+### Rust Example
+
+```rust
+use qdrant_client::{
+    client::QdrantClient,
+    qdrant::{
+        vectors_config::Config, CreateCollection, Distance, HnswConfigDiff,
+        VectorParams, VectorsConfig,
+    },
+};
+
+let client = QdrantClient::from_url("http://localhost:6334")
+    .build()
+    .await?;
+
+client
+    .create_collection(&CreateCollection {
+        collection_name: "my_collection".into(),
+        vectors_config: Some(VectorsConfig {
+            config: Some(Config::Params(VectorParams {
+                size: 384,
+                distance: Distance::Cosine.into(),
+                hnsw_config: Some(HnswConfigDiff {
+                    m: Some(16),
+                    ef_construct: Some(100),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })),
+        }),
+        replication_factor: Some(2),
+        ..Default::default()
+    })
+    .await?;
+```
+
+## Named Vectors
+
+Create collections with multiple named vectors:
+
+```python
+from qdrant_client import models
+
+client.create_collection(
+    collection_name="multi_vector",
+    vectors_config={
+        "text": models.VectorParams(
+            size=768,
+            distance=models.Distance.COSINE
+        ),
+        "image": models.VectorParams(
+            size=512,
+            distance=models.Distance.EUCLID
+        )
+    }
+)
+```
+
+## Vector Parameters
+
+From `collections.proto:20-38`:
+
+```protobuf
+message VectorParams {
+  uint64 size = 1;  // Dimension of vectors
+  Distance distance = 2;  // Distance function
+  optional HnswConfigDiff hnsw_config = 3;
+  optional QuantizationConfig quantization_config = 4;
+  optional bool on_disk = 5;  // Store vectors on disk
+  optional Datatype datatype = 6;  // float32, uint8, float16
+  optional MultiVectorConfig multivector_config = 7;
+}
+```
+
+### Distance Functions
+
+From `collections.proto:137-143`:
+
+```protobuf
+enum Distance {
+  Cosine = 1;    // Cosine similarity
+  Euclid = 2;    // Euclidean distance
+  Dot = 3;       // Dot product
+  Manhattan = 4; // Manhattan distance
+}
+```
+
+## Get Collection Info
+
+```python
+info = client.get_collection(collection_name="my_collection")
+
+print(f"Status: {info.status}")
+print(f"Vectors count: {info.vectors_count}")
+print(f"Points count: {info.points_count}")
+print(f"Segments: {info.segments_count}")
+print(f"Disk size: {info.disk_data_size}")
+```
+
+## List Collections
+
+```python
+collections = client.get_collections()
+
+for collection in collections.collections:
+    print(f"Collection: {collection.name}")
+```
+
+## Update Collection
+
+Modify collection configuration:
+
+```python
+from qdrant_client import models
+
+client.update_collection(
+    collection_name="my_collection",
+    optimizers_config=models.OptimizersConfigDiff(
+        indexing_threshold=50000,
+        memmap_threshold=100000
+    ),
+    hnsw_config=models.HnswConfigDiff(
+        ef_construct=200
+    )
+)
+```
+
+## Delete Collection
+
+```python
+client.delete_collection(collection_name="my_collection")
+```
+
+## Collection Aliases
+
+Manage collection aliases for zero-downtime updates:
+
+```python
+from qdrant_client import models
+
+# Create alias
+client.update_collection_aliases(
+    change_aliases_operations=[
+        models.CreateAliasOperation(
+            create_alias=models.CreateAlias(
+                collection_name="my_collection",
+                alias_name="production"
+            )
+        )
+    ]
+)
+
+# List aliases
+aliases = client.get_collection_aliases(collection_name="my_collection")
+
+# Rename alias
+client.update_collection_aliases(
+    change_aliases_operations=[
+        models.RenameAliasOperation(
+            rename_alias=models.RenameAlias(
+                old_alias_name="production",
+                new_alias_name="prod_v2"
+            )
+        )
+    ]
+)
+
+# Delete alias
+client.update_collection_aliases(
+    change_aliases_operations=[
+        models.DeleteAliasOperation(
+            delete_alias=models.DeleteAlias(
+                alias_name="production"
+            )
+        )
+    ]
+)
+```
+
+## HNSW Configuration
+
+From `collections.proto:202-231`:
+
+```protobuf
+message HnswConfigDiff {
+  optional uint64 m = 1;  // Edges per node (default: 16)
+  optional uint64 ef_construct = 2;  // Neighbors during build (default: 100)
+  optional uint64 full_scan_threshold = 3;  // Threshold for full scan in KB
+  optional uint64 max_indexing_threads = 4;  // Parallel indexing threads
+  optional bool on_disk = 5;  // Store index on disk
+  optional uint64 payload_m = 6;  // Payload-aware links
+}
+```
+
+### HNSW Tuning Example
+
+```python
+from qdrant_client import models
+
+client.create_collection(
+    collection_name="optimized",
+    vectors_config=models.VectorParams(
+        size=768,
+        distance=models.Distance.COSINE,
+        hnsw_config=models.HnswConfigDiff(
+            m=32,  # Higher M = better recall, more memory
+            ef_construct=200,  # Higher ef_construct = better index quality
+            full_scan_threshold=10000,  # Use HNSW for segments >10K vectors
+            on_disk=False  # Keep index in memory for speed
+        )
+    )
+)
+```
+
+## Quantization
+
+Enable vector quantization to reduce memory usage:
+
+### Scalar Quantization
+
+```python
+from qdrant_client import models
+
+client.create_collection(
+    collection_name="quantized",
+    vectors_config=models.VectorParams(
+        size=768,
+        distance=models.Distance.COSINE,
+        quantization_config=models.ScalarQuantization(
+            type=models.ScalarType.INT8,
+            quantile=0.99,
+            always_ram=True
+        )
+    )
+)
+```
+
+### Product Quantization
+
+```python
+client.create_collection(
+    collection_name="pq_collection",
+    vectors_config=models.VectorParams(
+        size=768,
+        distance=models.Distance.COSINE,
+        quantization_config=models.ProductQuantization(
+            compression=models.CompressionRatio.X16,
+            always_ram=True
+        )
+    )
+)
+```
+
+## Sharding
+
+Configure sharding for distributed collections:
+
+```python
+from qdrant_client import models
+
+client.create_collection(
+    collection_name="sharded",
+    vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE),
+    shard_number=4,  # Number of shards
+    replication_factor=2,  # Replicas per shard
+    write_consistency_factor=1,  # Acks needed for write
+    sharding_method=models.ShardingMethod.AUTO
+)
+```
+
+## Custom Shard Keys
+
+```python
+from qdrant_client import models
+
+# Create collection with custom sharding
+client.create_collection(
+    collection_name="tenant_sharded",
+    vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE),
+    sharding_method=models.ShardingMethod.CUSTOM
+)
+
+# Create shard key
+client.create_shard_key(
+    collection_name="tenant_sharded",
+    request=models.CreateShardKey(
+        shard_key=models.ShardKey(keyword="tenant_a"),
+        shards_number=2,
+        replication_factor=2
+    )
+)
+```
+
+## Collection Status
+
+From `collections.proto:145-155`:
+
+```protobuf
+enum CollectionStatus {
+  Green = 1;   // All segments ready
+  Yellow = 2;  // Optimization in progress
+  Red = 3;     // Error occurred
+  Grey = 4;    // Optimization pending
+}
+```
+
+## Cluster Operations
+
+Get cluster information for a collection:
+
+```python
+cluster_info = client.get_collection_cluster_info(
+    collection_name="my_collection"
+)
+
+print(f"Peer ID: {cluster_info.peer_id}")
+print(f"Shard count: {cluster_info.shard_count}")
+print(f"Local shards: {len(cluster_info.local_shards)}")
+print(f"Remote shards: {len(cluster_info.remote_shards)}")
+```
+
+## Collection Exists
+
+```python
+exists = client.collection_exists(collection_name="my_collection")
+if exists:
+    print("Collection exists")
+```
+
+## Best Practices
+
+<Tip>
+  **Performance Tips:**
+  - Use `on_disk_payload=True` for large payloads to save memory
+  - Enable quantization for >100M vectors to reduce memory 4-16x
+  - Set `shard_number` to number of nodes for distributed setup
+  - Use `replication_factor=2` or higher for production
+</Tip>
+
+<Warning>
+  **Configuration Immutability:**
+  - Vector size and distance function cannot be changed after creation
+  - To change these, create a new collection and migrate data
+  - HNSW and optimizer configs can be updated on existing collections
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Points Service" icon="circle-dot" href="/api/grpc/points">
+    Learn about point operations
+  </Card>
+  <Card title="Python Client" icon="python" href="/api/clients/python">
+    Python client documentation
+  </Card>
+</CardGroup>

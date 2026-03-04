@@ -1,0 +1,228 @@
+---
+title: Docker Deployment
+description: Deploy Qdrant using Docker with volume mounts, environment variables, and Docker Compose
+---
+
+Qdrant provides official Docker images for easy deployment. The container exposes ports 6333 (HTTP) and 6334 (gRPC) and can be configured using environment variables or configuration files.
+
+## Quick Start
+
+Run Qdrant with default settings:
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    qdrant/qdrant:latest
+```
+
+The service will be available at `http://localhost:6333`.
+
+## Volume Mounts
+
+For persistent storage, mount volumes for data and snapshots:
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+    -v $(pwd)/qdrant_snapshots:/qdrant/snapshots:z \
+    qdrant/qdrant:latest
+```
+
+<Note>
+The `:z` option is required on systems with SELinux to properly set file permissions.
+</Note>
+
+### Important Directories
+
+| Directory | Purpose | Default Path |
+|-----------|---------|-------------|
+| Storage | Vector data and indexes | `/qdrant/storage` |
+| Snapshots | Collection backups | `/qdrant/snapshots` |
+| Config | Configuration files | `/qdrant/config` |
+| Static | Web UI files | `/qdrant/static` |
+
+## Environment Variables
+
+Qdrant supports configuration via environment variables using the `QDRANT__` prefix with double underscores separating nested keys:
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -e QDRANT__SERVICE__HTTP_PORT=6333 \
+    -e QDRANT__SERVICE__GRPC_PORT=6334 \
+    -e QDRANT__SERVICE__API_KEY=your_secret_api_key \
+    -e QDRANT__LOG_LEVEL=INFO \
+    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+    qdrant/qdrant:latest
+```
+
+### Common Environment Variables
+
+<CodeGroup>
+
+```bash Service Configuration
+QDRANT__SERVICE__HOST=0.0.0.0
+QDRANT__SERVICE__HTTP_PORT=6333
+QDRANT__SERVICE__GRPC_PORT=6334
+QDRANT__SERVICE__API_KEY=your_secret_api_key
+QDRANT__SERVICE__READ_ONLY_API_KEY=your_read_only_key
+QDRANT__SERVICE__ENABLE_TLS=false
+```
+
+```bash Storage Configuration
+QDRANT__STORAGE__STORAGE_PATH=/qdrant/storage
+QDRANT__STORAGE__SNAPSHOTS_PATH=/qdrant/snapshots
+QDRANT__STORAGE__ON_DISK_PAYLOAD=true
+QDRANT__STORAGE__WAL__WAL_CAPACITY_MB=32
+```
+
+```bash Performance Configuration
+QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS=0
+QDRANT__STORAGE__PERFORMANCE__OPTIMIZER_CPU_BUDGET=0
+QDRANT__STORAGE__HNSW_INDEX__MAX_INDEXING_THREADS=0
+```
+
+```bash Cluster Configuration
+QDRANT__CLUSTER__ENABLED=true
+QDRANT__CLUSTER__P2P__PORT=6335
+```
+
+</CodeGroup>
+
+## Custom Configuration File
+
+Mount a custom configuration file to override defaults:
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -v $(pwd)/config/config.yaml:/qdrant/config/config.yaml:z \
+    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+    qdrant/qdrant:latest
+```
+
+## Docker Compose
+
+Create a `docker-compose.yml` file for easier management:
+
+```yaml
+version: '3.7'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333"  # HTTP API
+      - "6334:6334"  # gRPC API
+    volumes:
+      - ./qdrant_storage:/qdrant/storage:z
+      - ./qdrant_snapshots:/qdrant/snapshots:z
+      - ./config/config.yaml:/qdrant/config/config.yaml:z
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: [
+        "CMD-SHELL",
+        "wget --no-verbose --tries=1 --spider http://localhost:6333/healthz || exit 1"
+      ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+```
+
+Start the service:
+
+```bash
+docker-compose up -d
+```
+
+## Recovery Mode
+
+Qdrant includes automatic recovery handling for OOM (Out of Memory) situations. Enable it with:
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -e QDRANT_ALLOW_RECOVERY_MODE=true \
+    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+    qdrant/qdrant:latest
+```
+
+<Warning>
+If Qdrant is killed during initialization (typically due to OOM), it will restart in recovery mode where only collection deletion operations are allowed.
+</Warning>
+
+## GPU Support
+
+Qdrant offers Docker images with GPU support for NVIDIA and AMD:
+
+<Tabs>
+  <Tab title="NVIDIA GPU">
+    ```bash
+    docker run --gpus all -p 6333:6333 -p 6334:6334 \
+        -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+        qdrant/qdrant:latest-gpu-nvidia
+    ```
+
+    The NVIDIA GPU image includes:
+    - Vulkan support
+    - NVIDIA driver capabilities (compute, graphics, utility)
+    - Optimized GPU acceleration for vector operations
+  </Tab>
+  
+  <Tab title="AMD GPU">
+    ```bash
+    docker run --device=/dev/kfd --device=/dev/dri \
+        -p 6333:6333 -p 6334:6334 \
+        -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+        qdrant/qdrant:latest-gpu-amd
+    ```
+
+    The AMD GPU image is based on ROCm for AMD GPU acceleration.
+  </Tab>
+</Tabs>
+
+## Health Checks
+
+Qdrant provides Kubernetes-compatible health check endpoints:
+
+- `/healthz` - Liveness check
+- `/livez` - Liveness check (alias)
+- `/readyz` - Readiness check (returns "all shards are ready")
+
+Example health check command:
+
+```bash
+curl http://localhost:6333/healthz
+# Response: healthz check passed
+```
+
+## Build Arguments
+
+When building custom images, Qdrant's Dockerfile supports several build arguments:
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `PROFILE` | `release` | Cargo build profile (release/dev/ci) |
+| `FEATURES` | - | Additional Cargo features to enable |
+| `GPU` | - | Enable GPU support (nvidia/amd) |
+| `LINKER` | `mold` | Linker to use (mold/lld) |
+| `TARGET_CPU` | - | Target CPU architecture |
+| `USER_ID` | `0` | User ID for running Qdrant |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Learn about all configuration options
+  </Card>
+  <Card title="Security" icon="shield" href="/deployment/security">
+    Set up API keys and TLS
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
+    Deploy on Kubernetes
+  </Card>
+  <Card title="Distributed Mode" icon="network-wired" href="/deployment/distributed">
+    Set up a cluster
+  </Card>
+</CardGroup>

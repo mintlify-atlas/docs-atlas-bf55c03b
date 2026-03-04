@@ -1,0 +1,505 @@
+---
+title: Kubernetes Deployment
+description: Deploy Qdrant on Kubernetes with StatefulSets, persistent volumes, and service configuration
+---
+
+Qdrant can be deployed on Kubernetes for production workloads with high availability and scalability. This guide covers deployment configurations using StatefulSets for data persistence.
+
+## Quick Start with Deployment
+
+For a simple stateless deployment (development only):
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qdrant
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+    spec:
+      containers:
+      - name: qdrant
+        image: qdrant/qdrant:latest
+        ports:
+        - containerPort: 6333
+          name: http
+          protocol: TCP
+        - containerPort: 6334
+          name: grpc
+          protocol: TCP
+        env:
+        - name: QDRANT__SERVICE__GRPC_PORT
+          value: "6334"
+        - name: QDRANT__LOG_LEVEL
+          value: "INFO"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 6333
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 6333
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+```
+
+<Warning>
+This deployment does not persist data. Use StatefulSet for production workloads.
+</Warning>
+
+## StatefulSet for Persistence
+
+For production deployments with persistent storage:
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  namespace: default
+spec:
+  serviceName: qdrant-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+    spec:
+      containers:
+      - name: qdrant
+        image: qdrant/qdrant:latest
+        ports:
+        - containerPort: 6333
+          name: http
+        - containerPort: 6334
+          name: grpc
+        - containerPort: 6335
+          name: p2p
+        env:
+        - name: QDRANT__SERVICE__GRPC_PORT
+          value: "6334"
+        - name: QDRANT__CLUSTER__P2P__PORT
+          value: "6335"
+        volumeMounts:
+        - name: qdrant-storage
+          mountPath: /qdrant/storage
+        - name: qdrant-snapshots
+          mountPath: /qdrant/snapshots
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: 6333
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 6333
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "8Gi"
+            cpu: "2000m"
+  volumeClaimTemplates:
+  - metadata:
+      name: qdrant-storage
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 20Gi
+  - metadata:
+      name: qdrant-snapshots
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 10Gi
+```
+
+## Service Configuration
+
+Create services to expose Qdrant:
+
+### LoadBalancer Service (HTTP/gRPC)
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: default
+spec:
+  type: LoadBalancer
+  selector:
+    app: qdrant
+  ports:
+  - name: http
+    port: 6333
+    targetPort: 6333
+    protocol: TCP
+  - name: grpc
+    port: 6334
+    targetPort: 6334
+    protocol: TCP
+```
+
+### Headless Service (for StatefulSet)
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-headless
+  namespace: default
+spec:
+  clusterIP: None
+  selector:
+    app: qdrant
+  ports:
+  - name: http
+    port: 6333
+    targetPort: 6333
+  - name: grpc
+    port: 6334
+    targetPort: 6334
+  - name: p2p
+    port: 6335
+    targetPort: 6335
+```
+
+### ClusterIP Service (Internal)
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-internal
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: qdrant
+  ports:
+  - name: http
+    port: 6333
+    targetPort: 6333
+  - name: grpc
+    port: 6334
+    targetPort: 6334
+```
+
+## Configuration with ConfigMap
+
+Store configuration in a ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qdrant-config
+  namespace: default
+data:
+  config.yaml: |
+    log_level: INFO
+    
+    storage:
+      storage_path: /qdrant/storage
+      snapshots_path: /qdrant/snapshots
+      on_disk_payload: true
+      
+      performance:
+        max_search_threads: 0
+        optimizer_cpu_budget: 0
+    
+    service:
+      host: 0.0.0.0
+      http_port: 6333
+      grpc_port: 6334
+      enable_cors: true
+```
+
+Mount the ConfigMap in your StatefulSet:
+
+```yaml
+volumeMounts:
+- name: qdrant-config
+  mountPath: /qdrant/config
+  readOnly: true
+
+volumes:
+- name: qdrant-config
+  configMap:
+    name: qdrant-config
+```
+
+## Secrets for API Keys
+
+Store sensitive data in Kubernetes Secrets:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: qdrant-secrets
+  namespace: default
+type: Opaque
+stringData:
+  api-key: your-secret-api-key-here
+  read-only-api-key: your-read-only-key-here
+```
+
+Reference secrets in your deployment:
+
+```yaml
+env:
+- name: QDRANT__SERVICE__API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: qdrant-secrets
+      key: api-key
+- name: QDRANT__SERVICE__READ_ONLY_API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: qdrant-secrets
+      key: read-only-api-key
+```
+
+## Health Checks
+
+Qdrant provides native Kubernetes health check endpoints:
+
+<CodeGroup>
+
+```yaml Liveness Probe
+livenessProbe:
+  httpGet:
+    path: /livez
+    port: 6333
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+```
+
+```yaml Readiness Probe
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 6333
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+```
+
+```yaml Startup Probe
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: 6333
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 30
+```
+
+</CodeGroup>
+
+## Resource Recommendations
+
+### Small Deployment (Development)
+
+```yaml
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "250m"
+  limits:
+    memory: "2Gi"
+    cpu: "1000m"
+```
+
+### Medium Deployment (Production)
+
+```yaml
+resources:
+  requests:
+    memory: "4Gi"
+    cpu: "1000m"
+  limits:
+    memory: "16Gi"
+    cpu: "4000m"
+```
+
+### Large Deployment (High Traffic)
+
+```yaml
+resources:
+  requests:
+    memory: "16Gi"
+    cpu: "4000m"
+  limits:
+    memory: "64Gi"
+    cpu: "16000m"
+```
+
+## Ingress Configuration
+
+Expose Qdrant via Ingress:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: qdrant-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - qdrant.example.com
+    secretName: qdrant-tls
+  rules:
+  - host: qdrant.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: qdrant
+            port:
+              number: 6333
+```
+
+## Helm Chart (Community)
+
+While Qdrant doesn't provide an official Helm chart yet, you can create a basic one or use community-maintained charts:
+
+```bash
+# Create a basic Helm chart structure
+helm create qdrant-chart
+
+# Edit values.yaml with your configuration
+# Install the chart
+helm install qdrant ./qdrant-chart -n qdrant --create-namespace
+```
+
+<Note>
+The Qdrant community maintains unofficial Helm charts. Check the Qdrant GitHub organization for the latest options.
+</Note>
+
+## Horizontal Pod Autoscaling
+
+For cluster deployments, configure HPA:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: qdrant-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: qdrant
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+```
+
+<Warning>
+When using HPA with StatefulSets, ensure your cluster is properly configured with replication and sharding.
+</Warning>
+
+## Monitoring
+
+Qdrant exposes Prometheus metrics at `/metrics`:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-metrics
+  namespace: default
+  labels:
+    app: qdrant
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "6333"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: qdrant
+  ports:
+  - name: metrics
+    port: 6333
+    targetPort: 6333
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Distributed Deployment" icon="network-wired" href="/deployment/distributed">
+    Set up a multi-node cluster
+  </Card>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Tune performance and storage
+  </Card>
+  <Card title="Security" icon="shield" href="/deployment/security">
+    Enable TLS and authentication
+  </Card>
+  <Card title="Docker" icon="docker" href="/deployment/docker">
+    Docker deployment guide
+  </Card>
+</CardGroup>

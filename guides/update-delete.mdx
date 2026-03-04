@@ -1,0 +1,585 @@
+---
+title: Update and Delete
+description: Learn how to update payloads, update vectors, delete points by ID, and delete points by filter in Qdrant.
+---
+
+Qdrant provides flexible APIs for updating and deleting points, including operations on payloads, vectors, and entire points.
+
+## Update Payloads
+
+Update or add payload fields to existing points without modifying vectors.
+
+### Set Payload (Merge)
+
+Add or update specific payload fields while keeping existing fields.
+
+#### API Endpoint
+
+```
+POST /collections/{collection_name}/points/payload
+```
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/payload \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "payload": {
+      "status": "active",
+      "last_updated": "2024-03-04"
+    },
+    "points": [1, 2, 3]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.set_payload(
+    collection_name="my_collection",
+    payload={
+        "status": "active",
+        "last_updated": "2024-03-04"
+    },
+    points=[1, 2, 3]
+)
+```
+
+</CodeGroup>
+
+### Set Payload with Filter
+
+Update payload for all points matching a filter.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/payload \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "payload": {
+      "verified": true
+    },
+    "filter": {
+      "must": [
+        {
+          "key": "country",
+          "match": {"value": "Germany"}
+        }
+      ]
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.set_payload(
+    collection_name="my_collection",
+    payload={"verified": True},
+    points=Filter(
+        must=[
+            FieldCondition(
+                key="country",
+                match=MatchValue(value="Germany")
+            )
+        ]
+    )
+)
+```
+
+</CodeGroup>
+
+### Overwrite Payload
+
+Replace the entire payload, removing all existing fields.
+
+#### API Endpoint
+
+```
+PUT /collections/{collection_name}/points/payload
+```
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/my_collection/points/payload \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "payload": {
+      "city": "Berlin",
+      "country": "Germany"
+    },
+    "points": [1]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.overwrite_payload(
+    collection_name="my_collection",
+    payload={
+        "city": "Berlin",
+        "country": "Germany"
+    },
+    points=[1]
+)
+```
+
+</CodeGroup>
+
+<Warning>
+  `overwrite_payload` removes all existing payload fields. Use `set_payload` to merge fields instead.
+</Warning>
+
+## Delete Payload Fields
+
+Remove specific payload fields from points.
+
+### API Endpoint
+
+```
+POST /collections/{collection_name}/points/payload/delete
+```
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/payload/delete \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "keys": ["status", "last_updated"],
+    "points": [1, 2, 3]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.delete_payload(
+    collection_name="my_collection",
+    keys=["status", "last_updated"],
+    points=[1, 2, 3]
+)
+```
+
+</CodeGroup>
+
+### Delete Nested Fields
+
+Use dot notation to delete nested payload fields.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/payload/delete \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "keys": ["metadata.internal.temp_flag"],
+    "points": [1, 2]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.delete_payload(
+    collection_name="my_collection",
+    keys=["metadata.internal.temp_flag"],
+    points=[1, 2]
+)
+```
+
+</CodeGroup>
+
+## Clear All Payload
+
+Remove all payload from specified points, keeping vectors intact.
+
+### API Endpoint
+
+```
+POST /collections/{collection_name}/points/payload/clear
+```
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/payload/clear \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [1, 2, 3, 5, 8]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.clear_payload(
+    collection_name="my_collection",
+    points_selector=[1, 2, 3, 5, 8]
+)
+```
+
+</CodeGroup>
+
+## Update Vectors
+
+Update vectors for existing points without changing payloads.
+
+### API Endpoint
+
+```
+PUT /collections/{collection_name}/points/vectors
+```
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/my_collection/points/vectors \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [
+      {
+        "id": 1,
+        "vector": [0.11, 0.22, 0.33, 0.44]
+      },
+      {
+        "id": 2,
+        "vector": [0.55, 0.66, 0.77, 0.88]
+      }
+    ]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointVectors
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.update_vectors(
+    collection_name="my_collection",
+    points=[
+        PointVectors(
+            id=1,
+            vector=[0.11, 0.22, 0.33, 0.44]
+        ),
+        PointVectors(
+            id=2,
+            vector=[0.55, 0.66, 0.77, 0.88]
+        )
+    ]
+)
+```
+
+</CodeGroup>
+
+### Update Named Vectors
+
+For collections with multiple named vectors, update specific vectors.
+
+<CodeGroup>
+
+```bash REST API
+curl -X PUT http://localhost:6333/collections/multi_vector_collection/points/vectors \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [
+      {
+        "id": 1,
+        "vector": {
+          "text": [0.1, 0.2, 0.3, 0.4]
+        }
+      }
+    ]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointVectors
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.update_vectors(
+    collection_name="multi_vector_collection",
+    points=[
+        PointVectors(
+            id=1,
+            vector={
+                "text": [0.1, 0.2, 0.3, 0.4]
+            }
+        )
+    ]
+)
+```
+
+</CodeGroup>
+
+<Note>
+  When updating named vectors, you only need to specify the vectors you want to update. Other vectors remain unchanged.
+</Note>
+
+## Delete Vectors
+
+Delete specific named vectors from points while keeping other vectors and payloads.
+
+### API Endpoint
+
+```
+POST /collections/{collection_name}/points/vectors/delete
+```
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/multi_vector_collection/points/vectors/delete \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": ["image"],
+    "points": [1, 2, 3]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.delete_vectors(
+    collection_name="multi_vector_collection",
+    vectors=["image"],
+    points=[1, 2, 3]
+)
+```
+
+</CodeGroup>
+
+## Delete Points by ID
+
+Delete entire points (vectors and payloads) by their IDs.
+
+### API Endpoint
+
+```
+POST /collections/{collection_name}/points/delete
+```
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/delete \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "points": [1, 2, 3, 5, 8, 13]
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.delete(
+    collection_name="my_collection",
+    points_selector=[1, 2, 3, 5, 8, 13]
+)
+```
+
+</CodeGroup>
+
+## Delete Points by Filter
+
+Delete all points matching specific filter conditions.
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/delete \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "filter": {
+      "must": [
+        {
+          "key": "status",
+          "match": {"value": "inactive"}
+        }
+      ]
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.delete(
+    collection_name="my_collection",
+    points_selector=Filter(
+        must=[
+            FieldCondition(
+                key="status",
+                match=MatchValue(value="inactive")
+            )
+        ]
+    )
+)
+```
+
+</CodeGroup>
+
+### Complex Delete Filters
+
+<CodeGroup>
+
+```bash REST API
+curl -X POST http://localhost:6333/collections/my_collection/points/delete \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "filter": {
+      "must": [
+        {
+          "key": "year",
+          "range": {
+            "lt": 2020
+          }
+        }
+      ],
+      "must_not": [
+        {
+          "key": "important",
+          "match": {"value": true}
+        }
+      ]
+    }
+  }'
+```
+
+```python Python Client
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.delete(
+    collection_name="my_collection",
+    points_selector=Filter(
+        must=[
+            FieldCondition(
+                key="year",
+                range=Range(lt=2020)
+            )
+        ],
+        must_not=[
+            FieldCondition(
+                key="important",
+                match=MatchValue(value=True)
+            )
+        ]
+    )
+)
+```
+
+</CodeGroup>
+
+<Warning>
+  Delete by filter can affect many points. Always test your filter with a search query first to verify which points will be deleted.
+</Warning>
+
+## Query Parameters
+
+<ParamField query="wait" type="boolean" default="true">
+  If `true`, wait for the operation to complete. If `false`, return immediately after accepting the request.
+</ParamField>
+
+<ParamField query="ordering" type="string">
+  Ordering guarantees for the operation:
+  - `weak` - No ordering guarantees
+  - `medium` - Operations ordered within a node
+  - `strong` - Operations ordered across all nodes
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Operation timeout in seconds.
+</ParamField>
+
+## Response Format
+
+All update and delete operations return a similar response:
+
+```json
+{
+  "result": {
+    "operation_id": 127,
+    "status": "completed"
+  },
+  "status": "ok",
+  "time": 0.003
+}
+```
+
+<ResponseField name="result.operation_id" type="integer">
+  Sequential number of the operation.
+</ResponseField>
+
+<ResponseField name="result.status" type="string">
+  Operation status: `completed` or `acknowledged` (if wait=false).
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Overall response status.
+</ResponseField>
+
+<ResponseField name="time" type="number">
+  Time taken in seconds.
+</ResponseField>
+
+## Atomic Operations
+
+All update and delete operations in Qdrant are atomic:
+
+<Tabs>
+  <Tab title="Single Operation">
+    Each individual operation (set_payload, delete, etc.) is atomic. Either all specified points are updated or none are.
+  </Tab>
+  
+  <Tab title="Batch Operations">
+    When using the batch API (`/points/batch`), all operations in the batch are applied atomically.
+  </Tab>
+  
+  <Tab title="Consistency">
+    Use the `ordering` parameter to control consistency guarantees across distributed deployments.
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+1. **Test Filters First**: Before deleting by filter, run a search with the same filter to preview affected points
+2. **Use Set Payload**: Prefer `set_payload` over `overwrite_payload` to avoid accidentally removing fields
+3. **Batch Updates**: Group multiple updates into batch operations for better performance
+4. **Wait Parameter**: Use `wait=false` for bulk operations to improve throughput
+5. **Named Vectors**: When updating vectors in multi-vector collections, only update the vectors that changed
+6. **Backup**: Consider backing up important data before large delete operations
+7. **Point IDs**: Keep track of point IDs when performing updates to ensure you're modifying the correct points
+
+<Note>
+  Update operations modify points in-place without creating new versions. The point's version number is incremented with each update.
+</Note>

@@ -1,0 +1,435 @@
+---
+title: Distance Metrics
+description: Understanding distance metrics in Qdrant - Cosine, Euclidean, Dot Product, and Manhattan for vector similarity comparison
+---
+
+Distance metrics define how vectors are compared for similarity. Choosing the right metric is critical for accurate search results and depends on your embedding model.
+
+## Available Distance Metrics
+
+Qdrant supports four distance metrics:
+
+```rust
+// From lib/segment/src/types.rs:306-315
+pub enum Distance {
+    Cosine,     // Cosine similarity
+    Euclid,     // Euclidean distance  
+    Dot,        // Dot product
+    Manhattan,  // Manhattan distance
+}
+```
+
+### Cosine Similarity
+
+Measures the angle between vectors, ignoring magnitude:
+
+```python
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient("localhost", port=6333)
+
+client.create_collection(
+    collection_name="semantic_search",
+    vectors_config=models.VectorParams(
+        size=384,
+        distance=models.Distance.COSINE
+    )
+)
+```
+
+**Formula**: 
+```
+cosine_similarity(A, B) = (A · B) / (||A|| * ||B||)
+```
+
+**Score Range**: -1 (opposite) to 1 (identical)
+
+**Characteristics**:
+- **Normalized**: Vector magnitude doesn't affect similarity
+- **Order**: Higher scores are better (maximization)
+- **Symmetric**: cosine(A, B) = cosine(B, A)
+
+<Info>
+Cosine is the most common metric for semantic search and text embeddings. Most embedding models (OpenAI, Cohere, Sentence Transformers) are optimized for cosine similarity.
+</Info>
+
+#### When to Use Cosine
+
+✅ **Use Cosine when**:
+- Working with text embeddings (BERT, GPT, etc.)
+- Your embedding model outputs normalized vectors
+- You care about direction, not magnitude
+- Using pre-trained models (OpenAI, Cohere, etc.)
+
+❌ **Don't use Cosine when**:
+- Vector magnitude contains important information
+- Your model was specifically trained for Euclidean distance
+
+#### Example: Text Similarity
+
+```python
+# Vectors with same direction but different magnitudes are similar
+vec_a = [1.0, 2.0, 3.0]     # magnitude = 3.74
+vec_b = [2.0, 4.0, 6.0]     # magnitude = 7.48
+
+# Cosine similarity = 1.0 (identical direction)
+```
+
+### Euclidean Distance (L2)
+
+Measures straight-line distance between vectors:
+
+```python
+client.create_collection(
+    collection_name="image_search",
+    vectors_config=models.VectorParams(
+        size=512,
+        distance=models.Distance.EUCLID
+    )
+)
+```
+
+**Formula**:
+```
+euclidean_distance(A, B) = sqrt(Σ(Ai - Bi)²)
+```
+
+**Score Range**: 0 (identical) to ∞ (very different)
+
+**Characteristics**:
+- **Magnitude-sensitive**: Vector length affects distance
+- **Order**: Lower scores are better (minimization)
+- **Symmetric**: euclid(A, B) = euclid(B, A)
+
+<Info>
+Euclidean distance considers both direction and magnitude. It's commonly used for image embeddings and when vector magnitude is meaningful.
+</Info>
+
+#### When to Use Euclidean
+
+✅ **Use Euclidean when**:
+- Vector magnitude is meaningful
+- Working with image embeddings (ResNet, EfficientNet)
+- Your model was trained with Euclidean distance
+- You need geometric distance in embedding space
+
+❌ **Don't use Euclidean when**:
+- Vectors have inconsistent magnitudes
+- You only care about direction
+
+#### Example: Spatial Distance
+
+```python
+# Vectors with similar direction but different magnitudes are different
+vec_a = [1.0, 2.0, 3.0]
+vec_b = [2.0, 4.0, 6.0]
+
+# Euclidean distance = 3.74 (significant difference)
+```
+
+### Dot Product
+
+Computes the product of corresponding elements:
+
+```python
+client.create_collection(
+    collection_name="recommendation",
+    vectors_config=models.VectorParams(
+        size=256,
+        distance=models.Distance.DOT
+    )
+)
+```
+
+**Formula**:
+```
+dot_product(A, B) = Σ(Ai * Bi)
+```
+
+**Score Range**: -∞ to ∞
+
+**Characteristics**:
+- **Unnormalized**: Magnitude matters significantly
+- **Order**: Higher scores are better (maximization)
+- **Symmetric**: dot(A, B) = dot(B, A)
+- **Efficient**: Fastest to compute
+
+<Warning>
+Dot product is sensitive to vector magnitude. Longer vectors will have higher scores even if less similar in direction.
+</Warning>
+
+#### When to Use Dot Product
+
+✅ **Use Dot Product when**:
+- Your vectors are pre-normalized
+- Working with binary or categorical features
+- Your model was specifically trained for dot product
+- Maximum computational efficiency is needed
+
+❌ **Don't use Dot Product when**:
+- Vectors have inconsistent magnitudes
+- You need normalized similarity scores
+
+#### Relationship with Cosine
+
+For normalized vectors (||v|| = 1), dot product equals cosine similarity:
+```python
+# If vectors are normalized
+import numpy as np
+
+vec_a = [1.0, 0.0, 0.0]
+vec_b = [0.707, 0.707, 0.0]
+
+dot_product = np.dot(vec_a, vec_b)  # 0.707
+cosine_sim = np.dot(vec_a, vec_b) / (np.linalg.norm(vec_a) * np.linalg.norm(vec_b))  # 0.707
+
+# They're identical for normalized vectors!
+```
+
+<Tip>
+If your model outputs normalized vectors, use Dot Product instead of Cosine for better performance.
+</Tip>
+
+### Manhattan Distance (L1)
+
+Sum of absolute differences:
+
+```python
+client.create_collection(
+    collection_name="specialized",
+    vectors_config=models.VectorParams(
+        size=128,
+        distance=models.Distance.MANHATTAN
+    )
+)
+```
+
+**Formula**:
+```
+manhattan_distance(A, B) = Σ|Ai - Bi|
+```
+
+**Score Range**: 0 (identical) to ∞ (very different)
+
+**Characteristics**:
+- **Axis-aligned**: Measures distance along axes
+- **Order**: Lower scores are better (minimization)
+- **Symmetric**: manhattan(A, B) = manhattan(B, A)
+- **Robust**: Less sensitive to outliers than Euclidean
+
+#### When to Use Manhattan
+
+✅ **Use Manhattan when**:
+- Your features are independent/axis-aligned
+- You want robustness to outliers
+- Working with grid-like data
+- Your model was trained with Manhattan distance
+
+❌ **Don't use Manhattan when**:
+- Most embedding models (rarely optimized for L1)
+- You need standard semantic similarity
+
+<Info>
+Manhattan is less common in vector search but useful for specialized applications where features are independent.
+</Info>
+
+## Score Ordering
+
+```rust
+// From lib/segment/src/types.rs:342-347
+pub fn distance_order(&self) -> Order {
+    match self {
+        Distance::Cosine | Distance::Dot => Order::LargeBetter,
+        Distance::Euclid | Distance::Manhattan => Order::SmallBetter,
+    }
+}
+```
+
+| Metric | Better Score | Range |
+|--------|--------------|-------|
+| **Cosine** | Higher (maximize) | -1 to 1 |
+| **Euclidean** | Lower (minimize) | 0 to ∞ |
+| **Dot Product** | Higher (maximize) | -∞ to ∞ |
+| **Manhattan** | Lower (minimize) | 0 to ∞ |
+
+<Note>
+Qdrant automatically handles score ordering. Top results always represent most similar vectors regardless of metric.
+</Note>
+
+## Common Embedding Models
+
+Match your distance metric to your model:
+
+| Model | Dimensions | Distance |
+|-------|------------|----------|
+| **OpenAI text-embedding-3-small** | 1536 | Cosine |
+| **OpenAI text-embedding-3-large** | 3072 | Cosine |
+| **Cohere embed-english-v3.0** | 1024 | Cosine |
+| **Cohere embed-multilingual-v3.0** | 1024 | Cosine |
+| **Sentence Transformers (all-MiniLM-L6-v2)** | 384 | Cosine |
+| **Sentence Transformers (all-mpnet-base-v2)** | 768 | Cosine |
+| **CLIP ViT-B/32** | 512 | Cosine |
+| **ResNet-50** | 2048 | Euclidean |
+| **BGE-large-en-v1.5** | 1024 | Cosine |
+| **E5-large-v2** | 1024 | Cosine |
+
+<Tip>
+Always check your model's documentation for the recommended distance metric.
+</Tip>
+
+## Performance Comparison
+
+| Metric | Computation Speed | Memory | Use Case |
+|--------|------------------|---------|----------|
+| **Dot Product** | Fastest | Lowest | Pre-normalized vectors |
+| **Cosine** | Fast | Medium | General semantic search |
+| **Euclidean** | Medium | Medium | Image embeddings |
+| **Manhattan** | Medium | Medium | Specialized applications |
+
+## Threshold Filtering
+
+Set minimum similarity thresholds:
+
+```python
+# Cosine: only return results with similarity > 0.7
+results = client.search(
+    collection_name="my_collection",
+    query_vector=[0.1, 0.2, ...],
+    score_threshold=0.7,  # For Cosine: higher is better
+    limit=10
+)
+
+# Euclidean: only return results with distance < 5.0
+results = client.search(
+    collection_name="image_collection",
+    query_vector=[0.1, 0.2, ...],
+    score_threshold=5.0,  # For Euclidean: lower is better
+    limit=10
+)
+```
+
+```rust
+// From lib/segment/src/types.rs:357-361
+pub fn check_threshold(&self, score: ScoreType, threshold: ScoreType) -> bool {
+    match self.distance_order() {
+        Order::LargeBetter => score > threshold,
+        Order::SmallBetter => score < threshold,
+    }
+}
+```
+
+<Warning>
+Threshold direction depends on the metric:
+- **Cosine/Dot**: Use high thresholds (e.g., 0.7) to filter for similar items
+- **Euclidean/Manhattan**: Use low thresholds (e.g., 5.0) to filter for similar items
+</Warning>
+
+## Choosing the Right Metric
+
+### Decision Flow
+
+1. **Check your model's documentation** - Use the recommended metric
+2. **Are vectors normalized?**
+   - Yes → Use Dot Product (fastest) or Cosine (more intuitive)
+   - No → Continue to step 3
+3. **Does magnitude matter?**
+   - No → Use Cosine
+   - Yes → Use Euclidean
+4. **Special requirements?**
+   - Need outlier robustness → Manhattan
+   - Maximum speed → Dot Product (with normalization)
+
+### Quick Reference
+
+<Accordion title="For text embeddings (default)">
+  **Use Cosine**. Nearly all text embedding models are optimized for cosine similarity.
+</Accordion>
+
+<Accordion title="For image embeddings">
+  **Use Euclidean or Cosine**. Check your model's documentation. ResNets often use Euclidean, CLIP uses Cosine.
+</Accordion>
+
+<Accordion title="For maximum speed">
+  **Use Dot Product** if your vectors are pre-normalized. It's computationally cheaper than Cosine.
+</Accordion>
+
+<Accordion title="For normalized vectors">
+  **Use Dot Product**. It's equivalent to Cosine but faster.
+</Accordion>
+
+## Vector Normalization
+
+Normalize vectors for consistent Cosine/Dot Product behavior:
+
+```python
+import numpy as np
+
+def normalize_vector(vector):
+    """Normalize vector to unit length"""
+    norm = np.linalg.norm(vector)
+    if norm == 0:
+        return vector
+    return vector / norm
+
+# Example
+vector = [3.0, 4.0, 0.0]
+normalized = normalize_vector(vector)
+print(normalized)  # [0.6, 0.8, 0.0]
+print(np.linalg.norm(normalized))  # 1.0
+```
+
+```python
+# Batch normalization
+vectors = np.array([
+    [3.0, 4.0, 0.0],
+    [1.0, 0.0, 0.0],
+    [0.5, 0.5, 0.707]
+])
+
+# Normalize along each row
+norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+normalized = vectors / norms
+```
+
+<Info>
+Many embedding models (OpenAI, Cohere) return pre-normalized vectors. Check before normalizing!
+</Info>
+
+## Best Practices
+
+<Accordion title="Always use your model's recommended metric">
+  Embedding models are trained with specific metrics. Using a different metric will degrade results.
+</Accordion>
+
+<Accordion title="Normalize vectors when using Dot Product">
+  Dot Product is sensitive to magnitude. Normalize vectors first unless magnitude is meaningful.
+</Accordion>
+
+<Accordion title="Test with your actual data">
+  Benchmark different metrics with your queries to find what works best in practice.
+</Accordion>
+
+<Accordion title="Consider Dot Product for speed">
+  If using Cosine with normalized vectors, switch to Dot Product for better performance.
+</Accordion>
+
+<Accordion title="Be consistent">
+  Use the same metric for indexing and querying. Mixing metrics will produce incorrect results.
+</Accordion>
+
+## Related Concepts
+
+<CardGroup cols={2}>
+  <Card title="Collections" icon="layer-group" href="/concepts/collections">
+    Learn how to configure distance metrics in collections
+  </Card>
+  <Card title="Vectors" icon="chart-network" href="/concepts/vectors">
+    Understand vector types and preprocessing
+  </Card>
+  <Card title="Indexing" icon="magnifying-glass" href="/concepts/indexing">
+    Explore how HNSW indexes work with distance metrics
+  </Card>
+  <Card title="Points" icon="circle-dot" href="/concepts/points">
+    Learn how points store vectors for comparison
+  </Card>
+</CardGroup>

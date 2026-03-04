@@ -1,0 +1,199 @@
+---
+title: Hybrid Search
+description: Combine dense and sparse vectors for more powerful search capabilities that leverage both semantic understanding and keyword matching
+---
+
+Hybrid search combines the strengths of two complementary search approaches: **dense vector search** for semantic understanding and **sparse vector search** for precise keyword matching. This technique addresses the limitations of using either approach alone.
+
+## Why Hybrid Search?
+
+Dense embeddings excel at capturing semantic meaning but may struggle with:
+- Exact keyword matches
+- Proper nouns and domain-specific terminology
+- Rare or out-of-vocabulary terms
+
+Sparse vectors (similar to BM25/TF-IDF) excel at:
+- Precise keyword matching
+- Token-level relevance
+- Handling rare terms
+
+Combining both approaches provides the best of both worlds.
+
+## How It Works
+
+Qdrant allows you to store multiple named vectors per point. You can combine:
+1. **Dense vectors** - traditional embeddings (e.g., from sentence transformers)
+2. **Sparse vectors** - token-based representations with weighted indices
+
+### Vector Configuration
+
+Create a collection with both dense and sparse vectors:
+
+```json
+PUT /collections/hybrid_collection
+{
+  "vectors": {
+    "dense": {
+      "size": 768,
+      "distance": "Cosine"
+    },
+    "sparse": {
+      "modifier": "idf"
+    }
+  }
+}
+```
+
+### Inserting Data
+
+Store both vector types for each point:
+
+```json
+PUT /collections/hybrid_collection/points
+{
+  "points": [
+    {
+      "id": 1,
+      "vector": {
+        "dense": [0.1, 0.2, 0.3, ...],
+        "sparse": {
+          "indices": [15, 42, 156, 2048],
+          "values": [0.5, 1.2, 0.8, 0.3]
+        }
+      },
+      "payload": {"text": "Your document text"}
+    }
+  ]
+}
+```
+
+## Querying with Hybrid Search
+
+### Using Prefetch for Fusion
+
+The recommended approach is to use the **prefetch** API with fusion:
+
+```json
+POST /collections/hybrid_collection/points/query
+{
+  "prefetch": [
+    {
+      "query": [0.1, 0.2, 0.3, ...],
+      "using": "dense",
+      "limit": 20
+    },
+    {
+      "query": {
+        "indices": [15, 42, 156],
+        "values": [0.5, 1.2, 0.8]
+      },
+      "using": "sparse",
+      "limit": 20
+    }
+  ],
+  "query": {"fusion": "rrf"},
+  "limit": 10
+}
+```
+
+### Fusion Strategies
+
+<Accordion title="RRF (Reciprocal Rank Fusion)">
+  The default and most commonly used fusion method. It combines rankings from multiple searches using reciprocal ranks:
+  
+  ```
+  score = Σ(1 / (k + rank_i))
+  ```
+  
+  Where `k` is a constant (typically 60) and `rank_i` is the position in each result list.
+</Accordion>
+
+<Accordion title="Distribution-Based Score Fusion (DBSF)">
+  Normalizes scores from different searches based on their statistical distribution before combining them:
+  
+  ```json
+  {
+    "query": {"fusion": "dbsf"}
+  }
+  ```
+</Accordion>
+
+## Scoring Strategies
+
+### Separate Searches with Manual Combination
+
+You can also perform separate searches and combine results in your application:
+
+```python
+from qdrant_client import QdrantClient
+
+client = QdrantClient("localhost", port=6333)
+
+# Dense search
+dense_results = client.query_points(
+    collection_name="hybrid_collection",
+    query=dense_embedding,
+    using="dense",
+    limit=20
+)
+
+# Sparse search
+sparse_results = client.query_points(
+    collection_name="hybrid_collection",
+    query=sparse_vector,
+    using="sparse",
+    limit=20
+)
+
+# Combine results with custom logic
+combined = combine_results(dense_results, sparse_results)
+```
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="E-commerce Search" icon="cart-shopping">
+    Combine semantic understanding of product descriptions with exact SKU and brand name matching.
+  </Card>
+  <Card title="Legal Document Search" icon="scale-balanced">
+    Find documents by meaning while ensuring specific legal terms and citations are matched.
+  </Card>
+  <Card title="Code Search" icon="code">
+    Search by semantic functionality while matching exact function names and identifiers.
+  </Card>
+  <Card title="Academic Papers" icon="graduation-cap">
+    Semantic search for concepts combined with citation and author name matching.
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Retrieval Limits">
+    Retrieve more candidates in prefetch (e.g., 20-100) than your final limit (e.g., 10) to ensure fusion has sufficient data to work with.
+  </Accordion>
+  
+  <Accordion title="Vector Quality">
+    Ensure both dense and sparse vectors are generated from the same text to maintain consistency.
+  </Accordion>
+  
+  <Accordion title="Testing Fusion Methods">
+    Test both RRF and DBSF with your specific dataset - performance varies by use case.
+  </Accordion>
+  
+  <Accordion title="Monitoring">
+    Track which vector type contributes more to final results to optimize your approach.
+  </Accordion>
+</AccordionGroup>
+
+## Performance Considerations
+
+- Hybrid search requires two vector lookups, which increases query latency
+- Use HNSW indexing for dense vectors to maintain fast search
+- Sparse vector search uses inverted index, which is generally fast for high-dimensional sparse data
+- Consider using filters in prefetch to reduce candidate sets before fusion
+
+## Related Topics
+
+- [Sparse Vectors](/advanced/sparse-vectors) - Deep dive into sparse vector representation
+- [Quantization](/advanced/quantization) - Reduce memory usage for large vector collections

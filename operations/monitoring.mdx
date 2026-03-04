@@ -1,0 +1,437 @@
+---
+title: Monitoring
+description: Monitor Qdrant performance, metrics, and system health with Prometheus integration and telemetry
+---
+
+## Metrics Endpoint
+
+Qdrant exposes Prometheus-compatible metrics at the `/metrics` endpoint. These metrics provide detailed insights into system performance, resource utilization, and operational health.
+
+### Accessing Metrics
+
+Metrics are available via HTTP:
+
+```bash
+curl http://localhost:6333/metrics
+```
+
+### Dedicated Metrics Port
+
+For production environments, you can configure a separate port for metrics that is not protected by API keys:
+
+```yaml config/config.yaml
+service:
+  metrics_port: 9091
+```
+
+<Warning>
+The metrics port should only be accessible to trusted monitoring systems and not exposed to untrusted networks.
+</Warning>
+
+### Custom Metrics Prefix
+
+You can customize the prefix for all metrics:
+
+```yaml config/config.yaml
+service:
+  metrics_prefix: qdrant_
+```
+
+The prefix must contain only alphanumeric characters and underscores.
+
+## Available Metrics
+
+### Application Metrics
+
+#### App Info
+- **Metric:** `app_info`
+- **Type:** Gauge
+- **Description:** Information about the Qdrant server
+- **Labels:** `name`, `version`
+
+#### Recovery Mode
+- **Metric:** `app_status_recovery_mode`
+- **Type:** Gauge
+- **Description:** Whether recovery mode is enabled (1) or disabled (0)
+
+### Collection Metrics
+
+#### Total Collections
+- **Metric:** `collections_total`
+- **Type:** Gauge
+- **Description:** Number of collections in the system
+
+#### Total Vectors
+- **Metric:** `collections_vector_total`
+- **Type:** Gauge
+- **Description:** Total number of vectors across all collections
+
+#### Vectors by Collection
+- **Metric:** `collection_vectors`
+- **Type:** Gauge
+- **Description:** Number of vectors per collection and vector name
+- **Labels:** `collection`, `vector`
+
+#### Collection Points
+- **Metric:** `collection_points`
+- **Type:** Gauge
+- **Description:** Approximate number of points per collection
+- **Labels:** `id`
+
+#### Running Optimizations
+- **Metric:** `collection_running_optimizations`
+- **Type:** Gauge
+- **Description:** Number of currently running optimization tasks per collection
+- **Labels:** `id`
+
+#### Update Queue Length
+- **Metric:** `collection_update_queue_length`
+- **Type:** Gauge
+- **Description:** Number of pending operations in update queues per collection
+- **Labels:** `id`
+
+### Cluster Metrics
+
+#### Cluster Enabled
+- **Metric:** `cluster_enabled`
+- **Type:** Gauge
+- **Description:** Whether cluster support is enabled (1) or disabled (0)
+
+#### Total Peers
+- **Metric:** `cluster_peers_total`
+- **Type:** Gauge
+- **Description:** Total number of cluster peers
+
+#### Cluster Term
+- **Metric:** `cluster_term`
+- **Type:** Counter
+- **Description:** Current cluster consensus term
+
+#### Cluster Commit
+- **Metric:** `cluster_commit`
+- **Type:** Counter
+- **Description:** Index of last committed operation
+- **Labels:** `peer_id`
+
+#### Pending Operations
+- **Metric:** `cluster_pending_operations_total`
+- **Type:** Gauge
+- **Description:** Total number of pending consensus operations
+
+#### Active Replicas
+- **Metric:** `collection_active_replicas_min`, `collection_active_replicas_max`
+- **Type:** Gauge
+- **Description:** Minimum and maximum number of active replicas across all shards
+
+#### Dead Replicas
+- **Metric:** `collection_dead_replicas`
+- **Type:** Gauge
+- **Description:** Total number of shard replicas in non-active state
+
+#### Shard Transfers
+- **Metric:** `collection_shard_transfer_incoming`, `collection_shard_transfer_outgoing`
+- **Type:** Gauge
+- **Description:** Number of incoming/outgoing shard transfers currently running
+- **Labels:** `id`
+
+### Request Metrics
+
+#### REST Responses
+- **Metric:** `rest_responses_total`
+- **Type:** Counter
+- **Description:** Total number of REST API responses
+- **Labels:** `method`, `endpoint`, `status`
+
+#### REST Response Duration
+- **Metrics:** `rest_responses_avg_duration_seconds`, `rest_responses_min_duration_seconds`, `rest_responses_max_duration_seconds`, `rest_responses_duration_seconds` (histogram)
+- **Type:** Gauge/Histogram
+- **Description:** Response duration statistics for REST API
+- **Labels:** `method`, `endpoint`, `status`
+
+#### gRPC Responses
+- **Metric:** `grpc_responses_total`
+- **Type:** Counter
+- **Description:** Total number of gRPC responses
+- **Labels:** `endpoint`, `status`
+
+#### gRPC Response Duration
+- **Metrics:** `grpc_responses_avg_duration_seconds`, `grpc_responses_min_duration_seconds`, `grpc_responses_max_duration_seconds`, `grpc_responses_duration_seconds` (histogram)
+- **Type:** Gauge/Histogram
+- **Description:** Response duration statistics for gRPC API
+- **Labels:** `endpoint`, `status`
+
+### Memory Metrics
+
+- **Metric:** `memory_active_bytes`
+- **Type:** Gauge
+- **Description:** Total bytes in active pages allocated by the application
+
+- **Metric:** `memory_allocated_bytes`
+- **Type:** Gauge
+- **Description:** Total bytes allocated by the application
+
+- **Metric:** `memory_resident_bytes`
+- **Type:** Gauge
+- **Description:** Maximum bytes in physically resident data pages
+
+- **Metric:** `memory_retained_bytes`
+- **Type:** Gauge
+- **Description:** Total bytes in virtual memory mappings
+
+### System Metrics (Linux)
+
+#### Process Threads
+- **Metric:** `process_threads`
+- **Type:** Gauge
+- **Description:** Count of active threads
+
+#### Open File Descriptors
+- **Metric:** `process_open_fds`
+- **Type:** Gauge
+- **Description:** Count of currently open file descriptors
+
+- **Metric:** `process_max_fds`
+- **Type:** Gauge
+- **Description:** Limit for open file descriptors
+
+#### Memory Maps
+- **Metric:** `process_open_mmaps`
+- **Type:** Gauge
+- **Description:** Count of open memory maps
+
+- **Metric:** `system_max_mmaps`
+- **Type:** Gauge
+- **Description:** System-wide limit of open memory maps
+
+#### Page Faults
+- **Metric:** `process_minor_page_faults_total`
+- **Type:** Counter
+- **Description:** Count of minor page faults (no disk access)
+
+- **Metric:** `process_major_page_faults_total`
+- **Type:** Counter
+- **Description:** Count of major page faults (disk access required)
+
+### Snapshot Metrics
+
+- **Metric:** `snapshot_creation_running`
+- **Type:** Gauge
+- **Description:** Number of snapshot creations currently running
+- **Labels:** `id`
+
+- **Metric:** `snapshot_recovery_running`
+- **Type:** Gauge
+- **Description:** Number of snapshot recovery operations currently running
+- **Labels:** `id`
+
+- **Metric:** `snapshot_created_total`
+- **Type:** Counter
+- **Description:** Total number of snapshots created
+- **Labels:** `id`
+
+## Prometheus Integration
+
+### Configuration Example
+
+Add Qdrant to your Prometheus configuration:
+
+```yaml prometheus.yml
+scrape_configs:
+  - job_name: 'qdrant'
+    static_configs:
+      - targets: ['localhost:6333']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+```
+
+For dedicated metrics port:
+
+```yaml prometheus.yml
+scrape_configs:
+  - job_name: 'qdrant'
+    static_configs:
+      - targets: ['localhost:9091']
+    scrape_interval: 15s
+```
+
+### Grafana Dashboard
+
+Create dashboards using the exposed metrics to visualize:
+
+- Query performance and latency
+- Memory and CPU usage
+- Collection growth over time
+- Cluster health and consensus state
+- Shard transfer progress
+- Optimization task activity
+
+## Telemetry API
+
+Qdrant provides a telemetry API endpoint that returns detailed system information:
+
+```bash
+curl http://localhost:6333/telemetry
+```
+
+### Telemetry Levels
+
+Control the level of detail returned:
+
+```bash
+# Basic telemetry (level 0)
+curl http://localhost:6333/telemetry?detail_level=0
+
+# Detailed telemetry (level 1+)
+curl http://localhost:6333/telemetry?detail_level=1
+```
+
+### Telemetry Data Structure
+
+The telemetry endpoint returns:
+
+- **App information:** Version, build info, features enabled
+- **Collections:** Count, vector statistics, optimization status
+- **Cluster state:** Peer information, consensus status, transfers
+- **Requests:** API usage statistics by endpoint
+- **Memory:** Allocation statistics
+- **Hardware:** CPU and I/O metrics (when hardware reporting is enabled)
+
+### Enabling Hardware Reporting
+
+Hardware utilization metrics can be included in API responses:
+
+```yaml config/config.yaml
+service:
+  hardware_reporting: true
+```
+
+<Note>
+Hardware reporting is experimental and adds overhead to requests.
+</Note>
+
+## Health Checks
+
+### Liveness Check
+
+Verify that Qdrant is running:
+
+```bash
+curl http://localhost:6333/
+```
+
+Returns `200 OK` with version information if the service is alive.
+
+### Readiness Check
+
+Verify that Qdrant is ready to handle requests:
+
+```bash
+curl http://localhost:6333/readyz
+```
+
+The readiness check verifies:
+
+1. **Consensus sync:** Node has caught up with cluster commit index
+2. **Shard health:** All local shards are in a healthy state
+3. **Bootstrap completion:** Cluster has been bootstrapped (when applicable)
+
+Returns:
+- `200 OK` - Node is ready
+- `503 Service Unavailable` - Node is not ready
+
+<Info>
+Use the readiness endpoint for load balancer health checks to avoid routing traffic to nodes that are still synchronizing.
+</Info>
+
+## Logging
+
+### Log Configuration
+
+Configure logging in `config/config.yaml`:
+
+```yaml config/config.yaml
+log_level: INFO
+
+logger:
+  format: text  # or "json"
+  on_disk:
+    enabled: true
+    log_file: /var/log/qdrant/qdrant.log
+    log_level: INFO
+    format: text
+    buffer_size_bytes: 1024
+```
+
+### Log Levels
+
+- `ERROR` - Error messages only
+- `WARN` - Warnings and errors
+- `INFO` - General information (default)
+- `DEBUG` - Detailed debugging information
+- `TRACE` - Very verbose tracing
+
+### JSON Logging
+
+For structured logging (recommended for production):
+
+```yaml config/config.yaml
+logger:
+  format: json
+```
+
+### Slow Query Logging
+
+Log queries that take longer than a threshold:
+
+```yaml config/config.yaml
+service:
+  slow_query_secs: 1.0
+```
+
+Queries exceeding this duration will be logged at WARN level.
+
+## Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Set Up Alerts" icon="bell">
+Configure Prometheus alerts for critical metrics like dead replicas, high memory usage, and slow queries.
+</Card>
+
+<Card title="Monitor Disk Space" icon="hard-drive">
+Watch storage paths, snapshot directories, and WAL locations for available space.
+</Card>
+
+<Card title="Track Shard Health" icon="gauge">
+Monitor `collection_active_replicas_min` to detect availability issues early.
+</Card>
+
+<Card title="Analyze Request Patterns" icon="chart-line">
+Use request duration histograms to identify performance bottlenecks.
+</Card>
+
+</CardGroup>
+
+## Troubleshooting
+
+### High Memory Usage
+
+Check:
+- `memory_allocated_bytes` vs `memory_resident_bytes`
+- Collection count and vector density
+- `on_disk_payload` setting in storage configuration
+
+### Cluster Lag
+
+Monitor:
+- `cluster_pending_operations_total`
+- `cluster_commit` differences between peers
+- Network connectivity between nodes
+
+### Slow Queries
+
+Investigate:
+- `rest_responses_duration_seconds` histogram
+- Collection optimization status
+- Index configuration (HNSW parameters)
+- Resource contention (CPU, disk I/O)
