@@ -1,0 +1,150 @@
+{
+  "projectType": "data-platform",
+  "projectName": "Qdrant",
+  "projectDescription": "High-performance vector database and search engine for next-generation AI applications",
+  "theme": "aspen",
+  "primaryColor": "#040404",
+  "lightColor": "#e74264",
+  "darkColor": "#e19cb4",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/collections",
+              "concepts/points",
+              "concepts/vectors",
+              "concepts/payloads",
+              "concepts/indexing",
+              "concepts/distance-metrics"
+            ]
+          },
+          {
+            "group": "Working with Data",
+            "pages": [
+              "guides/create-collection",
+              "guides/insert-points",
+              "guides/search",
+              "guides/filtering",
+              "guides/batch-operations",
+              "guides/update-delete"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "advanced/hybrid-search",
+              "advanced/sparse-vectors",
+              "advanced/quantization",
+              "advanced/multitenancy",
+              "advanced/recommendations"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker",
+              "deployment/kubernetes",
+              "deployment/distributed",
+              "deployment/configuration",
+              "deployment/security"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/monitoring",
+              "operations/backup-restore",
+              "operations/snapshots",
+              "operations/scaling",
+              "operations/performance-tuning"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "REST API",
+            "pages": [
+              "api/rest/collections",
+              "api/rest/points",
+              "api/rest/search",
+              "api/rest/snapshots",
+              "api/rest/cluster"
+            ]
+          },
+          {
+            "group": "gRPC API",
+            "pages": [
+              "api/grpc/overview",
+              "api/grpc/collections",
+              "api/grpc/points"
+            ]
+          },
+          {
+            "group": "Client Libraries",
+            "pages": [
+              "api/clients/python",
+              "api/clients/javascript",
+              "api/clients/rust",
+              "api/clients/go",
+              "api/clients/dotnet",
+              "api/clients/java"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Vector similarity search with HNSW indexing",
+    "Advanced filtering with JSON payload support",
+    "Hybrid search combining dense and sparse vectors",
+    "Distributed deployment with sharding and replication",
+    "Vector quantization for memory efficiency",
+    "REST and gRPC APIs",
+    "Snapshot-based backup and recovery",
+    "SIMD hardware acceleration",
+    "Multi-vector and multi-tenancy support",
+    "Real-time updates with write-ahead logging"
+  ],
+  "publicApiSurface": [
+    "POST /collections/{collection_name}",
+    "GET /collections/{collection_name}",
+    "DELETE /collections/{collection_name}",
+    "PUT /collections/{collection_name}/points",
+    "POST /collections/{collection_name}/points/search",
+    "POST /collections/{collection_name}/points/recommend",
+    "POST /collections/{collection_name}/points/scroll",
+    "POST /collections/{collection_name}/points/delete",
+    "GET /collections/{collection_name}/points/{id}",
+    "POST /collections/{collection_name}/snapshots",
+    "GET /cluster",
+    "gRPC: Collections service",
+    "gRPC: Points service",
+    "Python client: QdrantClient",
+    "JavaScript client: QdrantClient",
+    "Rust client: qdrant-client",
+    "Go client: go-client"
+  ]
+}
