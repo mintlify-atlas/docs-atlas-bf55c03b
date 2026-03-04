@@ -638,3 +638,244 @@ curl -X POST 'http://localhost:6333/collections/{collection_name}/points/search/
 ```
 
 Parameters are identical to search matrix pairs, but returns results in a compressed offset format suitable for large matrices.
+
+## Count Points
+
+Count points in a collection that match a given filter.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/count' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "filter": {
+      "must": [
+        {
+          "key": "city",
+          "match": {
+            "value": "London"
+          }
+        }
+      ]
+    },
+    "exact": true
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to count in
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level: `majority`, `quorum`, or `all`
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="filter" type="object">
+  Filter conditions to apply. Only points matching this filter will be counted.
+</ParamField>
+
+<ParamField body="exact" type="boolean">
+  If true, provide exact count. If false, may provide approximate count for better performance.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="count" type="integer">
+    Number of points matching the filter
+  </ResponseField>
+</ResponseField>
+
+## Facet
+
+Count points for each unique value of a payload key, optionally with filtering.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/facet' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "key": "city",
+    "limit": 10
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to facet in
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level: `majority`, `quorum`, or `all`
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="key" type="string" required>
+  Payload key to facet by
+</ParamField>
+
+<ParamField body="limit" type="integer">
+  Maximum number of unique values to return. Default is 10.
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter conditions to apply before faceting
+</ParamField>
+
+<ParamField body="exact" type="boolean">
+  If true, provide exact counts. If false, may use approximations for better performance.
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="object">
+  <ResponseField name="hits" type="array">
+    Array of facet results
+    
+    <ResponseField name="value" type="any">
+      The unique value of the payload key
+    </ResponseField>
+    
+    <ResponseField name="count" type="integer">
+      Number of points with this value
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+**Example: Count products by category**
+
+```bash
+curl -X POST 'http://localhost:6333/collections/products/facet' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "key": "category",
+    "limit": 20,
+    "filter": {
+      "must": [
+        {
+          "key": "in_stock",
+          "match": { "value": true }
+        }
+      ]
+    }
+  }'
+```
+
+## Discover Points
+
+Look for points that satisfy context pairs (positive/negative examples) and optionally approach a target.
+
+```bash
+curl -X POST 'http://localhost:6333/collections/{collection_name}/points/discover' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "context": [
+      {
+        "positive": 100,
+        "negative": 718
+      },
+      {
+        "positive": 200,
+        "negative": 300
+      }
+    ],
+    "target": [0.2, 0.1, 0.9, 0.7],
+    "limit": 10
+  }'
+```
+
+**Path Parameters**
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to search in
+</ParamField>
+
+**Query Parameters**
+
+<ParamField query="consistency" type="string">
+  Read consistency level: `majority`, `quorum`, or `all`
+</ParamField>
+
+<ParamField query="timeout" type="integer">
+  Request timeout in seconds
+</ParamField>
+
+**Request Body**
+
+<ParamField body="context" type="array">
+  Array of positive-negative example pairs. Each pair consists of a `positive` point ID and a `negative` point ID. Results will be points that are more similar to positives than negatives.
+</ParamField>
+
+<ParamField body="target" type="array | object">
+  Optional target vector to approach. Can be a dense vector or named vector.
+</ParamField>
+
+<ParamField body="limit" type="integer">
+  Maximum number of results to return. Default is 10.
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Filter conditions to apply
+</ParamField>
+
+<ParamField body="with_payload" type="boolean | array | object">
+  Whether to return payload
+</ParamField>
+
+<ParamField body="with_vector" type="boolean | array">
+  Whether to return vectors
+</ParamField>
+
+**Response**
+
+<ResponseField name="result" type="array">
+  Array of scored points. The score combines context ranking and distance to target.
+  
+  <ResponseField name="id" type="integer | string">
+    Point ID
+  </ResponseField>
+  
+  <ResponseField name="score" type="float">
+    Combined score. Integer part represents context rank, decimal part represents distance to target.
+  </ResponseField>
+  
+  <ResponseField name="payload" type="object">
+    Point payload (if requested)
+  </ResponseField>
+</ResponseField>
+
+**Use Case: Analogical Search**
+
+Find items that have a similar relationship to the target as the positive/negative pairs demonstrate.
+
+```bash
+# Find images similar to "night" as "day" is to "beach"
+curl -X POST 'http://localhost:6333/collections/images/points/discover' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "context": [
+      {
+        "positive": 1,  # "day" image
+        "negative": 2   # "beach" image
+      }
+    ],
+    "target": 3,  # "night" image
+    "limit": 5
+  }'
+```
